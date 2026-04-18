@@ -174,7 +174,7 @@ def fetch_sheet_rows(limit: int | None = 120) -> list[dict[str, str]]:
     return leads
 
 
-ALLOWED_STATUS_VALUES = {"confirmed", "rejected", "snoozed", "waiting", "new"}
+ALLOWED_STATUS_VALUES = {"confirmed", "rejected", "snoozed", "waiting", "new", "postponed", "in_work"}
 
 
 def update_lead_status(row_number: int, status: str, rejection_reason: str | None = None) -> None:
@@ -197,41 +197,56 @@ def update_lead_status(row_number: int, status: str, rejection_reason: str | Non
     ).execute()
 
 
-def update_lead_status_gmail_id(gmail_id: str, status: str, rejection_reason: str | None = None) -> None:
+def update_lead_status_gmail_id(gmail_id: str, status: str, user_info: dict = None, rejection_reason: str | None = None) -> None:
     """Update lead status in DuckDB by gmail_id"""
     if not gmail_id:
         raise ValueError("gmail_id is required")
 
     normalized_status = (status or "").strip().lower()
     if normalized_status not in ALLOWED_STATUS_VALUES:
-        raise ValueError("Unsupported status value")
+        raise ValueError(f"Unsupported status value: {normalized_status}")
 
-    conn.execute(
-        """
-        UPDATE gmail_messages
-        SET status = ?
-        WHERE gmail_id = ?
-        """,
-        [normalized_status, gmail_id],
-    )
+    # For postponed, we might want to unassign if it was "in_work"
+    # But according to user: "when manager clicks postponed, lead is written with status postponed and button changes to return to work"
+    # "he can postpone it and it will be visible again and all others will become visible to him"
+    
+    with db_lock:
+        if normalized_status == "postponed":
+            # If postponing, we unassign so others can see it again? 
+            # User said: "it will be visible again and all others will become visible to him"
+            # This implies releasing the "in_work" exclusive lock.
+            conn.execute(
+                "UPDATE gmail_messages SET status = ?, assigned_to = NULL, assigned_at = NULL WHERE gmail_id = ?",
+                [normalized_status, gmail_id],
+            )
+        else:
+            conn.execute(
+                "UPDATE gmail_messages SET status = ? WHERE gmail_id = ?",
+                [normalized_status, gmail_id],
+            )
 
-    history_id = f"{gmail_id}_{datetime.now().isoformat()}"
-    lead_name = conn.execute(
-        "SELECT full_name FROM gmail_messages WHERE gmail_id = ?",
-        [gmail_id],
-    ).fetchone()
-    lead_name = lead_name[0] if lead_name else "Unknown"
+        import uuid
+        history_id = str(uuid.uuid4())
+        
+        lead_name = conn.execute(
+            "SELECT full_name FROM gmail_messages WHERE gmail_id = ?",
+            [gmail_id],
+        ).fetchone()
+        lead_name = lead_name[0] if lead_name else "Unknown"
 
-    conn.execute(
-        """
-        INSERT INTO lead_status_history
-        (id, gmail_id, lead_name, status, rejection_reason, changed_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        [history_id, gmail_id, lead_name, normalized_status, rejection_reason, datetime.now()],
-    )
+        assignee_name = user_info.get("username") if user_info else "System"
 
-    conn.commit()
+        conn.execute(
+            """
+            INSERT INTO lead_status_history
+            (id, gmail_id, lead_name, status, assignee, rejection_reason, changed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [history_id, gmail_id, lead_name, normalized_status, assignee_name, rejection_reason, datetime.now()],
+        )
+
+        conn.commit()
+
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -363,20 +378,46 @@ def build_leads_payload_from_db(
             leads.append(lead_dict)
 
     elif user_info and user_info.get("role") == "manager":
-        # Manager sees all leads with assignment info (same as admin)
-        query = """
-            SELECT
-                gmail_id, status, first_name, last_name, full_name, gm.email, subject,
-                received_at, company, body, phone, website, company_name, company_info,
-                person_role, person_links, person_location, person_experience, person_summary,
-                person_insights, company_insights, assigned_to, assigned_at, synced_at, created_at,
-                u.username as assigned_username, u.role as assigned_role
-            FROM gmail_messages gm
-            LEFT JOIN users u ON gm.assigned_to = u.id
-            ORDER BY created_at DESC
-            LIMIT ?
-        """
-        leads_data = conn.execute(query, [limit]).fetchall()
+        # Manager logic:
+        # - If manager has ANY lead with status IN_WORK, return ONLY that lead.
+        # - Otherwise, return all leads EXCEPT those that are IN_WORK for other managers.
+        user_id = user_info.get("id")
+        with db_lock:
+            my_in_work = conn.execute(
+                "SELECT gmail_id FROM gmail_messages WHERE assigned_to = ? AND UPPER(status) = 'IN_WORK'",
+                [user_id],
+            ).fetchone()
+
+            if my_in_work:
+                query = """
+                    SELECT
+                        gmail_id, status, first_name, last_name, full_name, gm.email, subject,
+                        received_at, company, body, phone, website, company_name, company_info,
+                        person_role, person_links, person_location, person_experience, person_summary,
+                        person_insights, company_insights, assigned_to, assigned_at, synced_at, created_at,
+                        u.username as assigned_username, u.role as assigned_role
+                    FROM gmail_messages gm
+                    LEFT JOIN users u ON gm.assigned_to = u.id
+                    WHERE gm.gmail_id = ?
+                """
+                leads_data = conn.execute(query, [my_in_work[0]]).fetchall()
+            else:
+                query = """
+                    SELECT
+                        gmail_id, status, first_name, last_name, full_name, gm.email, subject,
+                        received_at, company, body, phone, website, company_name, company_info,
+                        person_role, person_links, person_location, person_experience, person_summary,
+                        person_insights, company_insights, assigned_to, assigned_at, synced_at, created_at,
+                        u.username as assigned_username, u.role as assigned_role
+                    FROM gmail_messages gm
+                    LEFT JOIN users u ON gm.assigned_to = u.id
+                    WHERE gm.status IS NULL
+                       OR UPPER(gm.status) != 'IN_WORK'
+                       OR gm.assigned_to = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """
+                leads_data = conn.execute(query, [user_id, limit]).fetchall()
 
         leads = []
         for lead in leads_data:

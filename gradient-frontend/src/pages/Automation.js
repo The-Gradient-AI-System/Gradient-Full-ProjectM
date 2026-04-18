@@ -5,6 +5,87 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useModalManager } from '../context/ModalManagerContext';
 
+// --- Helper Functions and Hooks ---
+
+const parseDate = (val) => {
+  if (!val) return null;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+const formatDate = (val) => {
+  const d = parseDate(val);
+  if (!d) return '—';
+  return d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' });
+};
+
+const formatRelative = (val) => {
+  const d = parseDate(val);
+  if (!d) return '';
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'щойно';
+  if (mins < 60) return `${mins} хв тому`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} год тому`;
+  return `${Math.floor(hrs / 24)} дн. тому`;
+};
+
+const getLeadKey = (lead) => {
+  if (!lead) return '';
+  return lead.gmail_id || lead.gmailId || lead.email || `row-${lead.sheet_row || lead.sheetRow}`;
+};
+
+const getLeadStatus = (lead) => lead?.status || 'new';
+
+const isQualifiedLead = (lead) => {
+  const score = lead?.completeness_score ?? lead?.score ?? 0;
+  return score >= 70;
+};
+
+const isEmptyLeadRow = (lead) => !lead || (!lead.email && !lead.full_name);
+
+const getLeadCompletenessScore = (lead) => lead?.completeness_score ?? lead?.score ?? 0;
+
+const normalizeLeadInsights = (lead) => {
+  if (!lead) return null;
+  return {
+    person_links: lead.person_links || [],
+    person_insights: lead.person_insights || [],
+    company: lead.company || '',
+    website: lead.website || '',
+    company_summary: lead.company_summary || '',
+    company_insights: lead.company_insights || [],
+    ...lead
+  };
+};
+
+const useLeadData = (snapshot, updateSnapshot) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(async (options = {}) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getGmailLeads();
+      updateSnapshot(data, options);
+    } catch (err) {
+      setError(err.message || 'Не вдалося завантажити дані');
+    } finally {
+      setLoading(false);
+    }
+  }, [updateSnapshot]);
+
+  useEffect(() => {
+    if (!snapshot) {
+      refresh();
+    }
+  }, [snapshot, refresh]);
+
+  return { data: snapshot, loading, error, refresh };
+};
+
 const PageContainer = styled.div`
 
   display: flex;
@@ -637,6 +718,39 @@ const LeadMeta = styled.div`
 
 
 
+const RANGE_OPTIONS = [7, 14, 30];
+
+const getRangeLabel = (days) => {
+  if (days === 7) return '7 днів';
+  if (days === 14) return '14 днів';
+  if (days === 30) return '30 днів';
+  return `${days} днів`;
+};
+
+const BADGE_LABELS = {
+  confirmed: 'Підтверджено',
+  rejected: 'Відхилено',
+  snoozed: 'Відкладено',
+  postponed: 'Відкладено',
+  in_work: 'В роботі',
+  qualified: 'Кваліфікований',
+  new: 'Новий',
+  waiting: 'В очікуванні',
+  call_lead: 'Дзвінок',
+};
+
+const STATUS_TOOLTIPS = {
+  confirmed: 'Клієнт підтверджений',
+  rejected: 'Клієнт відхилений',
+  snoozed: 'Розгляд відкладено',
+  postponed: 'Розгляд відкладено',
+  in_work: 'В процесі обробки',
+  qualified: 'Кваліфікований лід',
+  new: 'Новий лід',
+  waiting: 'Очікує відповіді',
+  call_lead: 'Заплановано дзвінок',
+};
+
 const BADGE_VARIANTS = {
 
   confirmed: {
@@ -646,6 +760,26 @@ const BADGE_VARIANTS = {
     background: '#ffffff',
 
     border: '1px solid rgba(21, 128, 61, 0.28)',
+
+  },
+
+  postponed: {
+
+    color: '#b45309',
+
+    background: '#ffffff',
+
+    border: '1px solid rgba(180, 83, 9, 0.28)',
+
+  },
+
+  in_work: {
+
+    color: '#ffffff',
+
+    background: '#6366f1',
+
+    border: '1px solid #4f46e5',
 
   },
 
@@ -2354,6 +2488,10 @@ const DECISION_LABELS = {
 
   snoozed: 'Відкладено',
 
+  postponed: 'Відкладено',
+
+  in_work: 'В роботі',
+
 };
 
 
@@ -2366,6 +2504,10 @@ const DECISION_ROW_TONES = {
 
   snoozed: 'rgba(255, 179, 71, 0.16)',
 
+  postponed: 'rgba(255, 189, 89, 0.22)',
+
+  in_work: 'rgba(0, 128, 0, 0.16)',
+
 };
 
 
@@ -2374,361 +2516,25 @@ const WAITING_ROW_TONE = 'rgba(190, 201, 226, 0.14)';
 
 
 
-const BADGE_LABELS = {
-
-  confirmed: DECISION_LABELS.confirmed,
-
-  rejected: DECISION_LABELS.rejected,
-
-  snoozed: DECISION_LABELS.snoozed,
-
-  qualified: 'Кваліфікований',
-
-  new: 'Новий',
-
-  waiting: 'Очікує',
-  call_lead: '📞 Дзвінок з лідом',
-};
-
-const STATUS_TOOLTIPS = {
-  confirmed: 'Лід підтверджено - готовий до подальшої роботи',
-  rejected: 'Лід відхилено - не релевантний',
-  snoozed: 'Лід відкладено - повернутись пізніше',
-  qualified: 'Кваліфікований лід - має контактні дані',
-  new: 'Новий лід - потребує опрацювання',
-  waiting: 'Очікує на відповідь або дію',
-  call_lead: '🎯 ВАЖЛИВО: Потрібно зателефонувати ліду!',
-};
-
-
-
-const getLeadKey = (lead) => {
-
-  if (!lead) return 'unknown';
-
-  if (lead.gmail_id) return `${lead.gmail_id}`;
-
-  if (lead.id) return `${lead.id}`;
-
-  const email = (lead.email || '').trim().toLowerCase();
-
-  if (email) return `email:${email}`;
-
-  const fallback = lead.full_name || 'lead';
-
-  return `${fallback}-${lead.received_at || ''}`;
-
-};
-
-
-
-const getLeadStatus = (lead) => (lead?.status || 'waiting').toLowerCase();
-
-
-
-const isEmptyLeadRow = (lead) => {
-
-  if (!lead) return true;
-
-  const email = (lead.email || '').trim();
-
-  const subject = (lead.subject || '').trim();
-
-  const body = (lead.body || '').trim();
-
-  return !email && !subject && !body;
-
-};
-
-
-
-const getLeadCompletenessScore = (lead) => {
-
-  if (!lead) return 0;
-
-  let score = 0;
-
-  if ((lead.email || '').trim()) score += 3;
-
-  if ((lead.subject || '').trim()) score += 2;
-
-  if ((lead.body || '').trim()) score += 1;
-
-  if ((lead.full_name || '').trim()) score += 2;
-
-  if ((lead.company || lead.company_name || '').trim()) score += 1;
-
-  if ((lead.phone || '').trim()) score += 1;
-
-  if ((lead.website || '').trim()) score += 1;
-
-  return score;
-
-};
-
-
-
-const normalizeLeadInsights = (lead) => {
-
-  if (!lead) return null;
-
-
-
-  const personLinksRaw = lead.person_links;
-
-  let personLinks = [];
-
-  if (Array.isArray(personLinksRaw)) {
-
-    personLinks = personLinksRaw.filter(Boolean);
-
-  } else if (typeof personLinksRaw === 'string' && personLinksRaw.trim()) {
-
-    personLinks = personLinksRaw
-
-      .split(';')
-
-      .map((item) => item.trim())
-
-      .filter(Boolean);
-
-  }
-
-
-
-  const personInsights = Array.isArray(lead.person_insights) ? lead.person_insights : [];
-
-  const companyInsights = Array.isArray(lead.company_insights) ? lead.company_insights : [];
-
-  const personSummary = lead.person_summary || '';
-
-  const firstName = lead.first_name || '';
-
-  const lastName = lead.last_name || '';
-
-
-
-  return {
-
-    ...lead,
-
-    person_links: personLinks,
-
-    person_insights: personInsights,
-
-    company_insights: companyInsights,
-
-    person_summary: personSummary,
-
-    first_name: firstName,
-
-    last_name: lastName,
-
-  };
-
-};
-
-
-
-const RANGE_OPTIONS = [7, 14, 30];
-
-
-
-const getRangeLabel = (days) => {
-
-  switch (days) {
-
-    case 7:
-
-      return '7 днів';
-
-    case 14:
-
-      return '14 днів';
-
-    case 30:
-
-      return '30 днів';
-
-    default:
-
-      return `${days} днів`;
-
-  }
-
-};
-
-
-
-const useLeadData = (initialPayload, onAfterFetch) => {
-
-  const [data, setData] = useState(() => initialPayload ?? null);
-
-  const [loading, setLoading] = useState(false);
-
-  const [error, setError] = useState(null);
-
-
-
-  const fetchData = useCallback(async (options = {}) => {
-
-    setLoading(true);
-
-    setError(null);
-
-
-
-    try {
-
-      const response = await getGmailLeads();
-
-      if (!response) {
-
-        throw new Error('Порожня відповідь від сервера');
-
-      }
-
-      setData(response);
-
-      onAfterFetch?.(response, options);
-
-      return response;
-
-    } catch (err) {
-
-      const message = err instanceof Error ? err.message : 'Сталася помилка';
-
-      setError(message);
-
-      return null;
-
-    } finally {
-
-      setLoading(false);
-
-    }
-
-  }, [onAfterFetch]);
-
-
-
-  const refresh = useCallback((options) => fetchData(options), [fetchData]);
-
-
-
-  return {
-
-    data,
-
-    loading,
-
-    error,
-
-    refresh,
-
-  };
-
-};
-
-
-
-const isQualifiedLead = (lead) => {
-
-  if (!lead) return false;
-
-  return Boolean(lead.phone || lead.website || lead.company || lead.company_name);
-
-};
-
-
-
-const parseDate = (value) => {
-
-  if (!value) return null;
-
-  const normalized = value.endsWith('Z') ? value : `${value}`;
-
-  const date = new Date(normalized);
-
-  return Number.isNaN(date.getTime()) ? null : date;
-
-};
-
-
-
-const formatDate = (value, locale = 'uk-UA') => {
-
-  const date = parseDate(value);
-
-  if (!date) return '—';
-
-  return new Intl.DateTimeFormat(locale, {
-
-    day: '2-digit',
-
-    month: 'short',
-
-    year: 'numeric',
-
-    hour: '2-digit',
-
-    minute: '2-digit',
-
-  }).format(date);
-
-};
-
-
-
-const formatRelative = (value) => {
-
-  const date = parseDate(value);
-
-  if (!date) return '—';
-
-  const now = new Date();
-
-  const diffMs = now.getTime() - date.getTime();
-
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays <= 0) {
-
-    const diffHours = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60)));
-
-    return `${diffHours} год тому`;
-
-  }
-
-  if (diffDays === 1) return 'Вчора';
-
-  if (diffDays < 7) return `${diffDays} дн. тому`;
-
-  const diffWeeks = Math.floor(diffDays / 7);
-
-  if (diffWeeks < 5) return `${diffWeeks} тиж. тому`;
-
-  const diffMonths = Math.floor(diffDays / 30);
-
-  if (diffMonths < 12) return `${diffMonths} міс. тому`;
-
-  const diffYears = Math.floor(diffMonths / 12);
-
-  return `${diffYears} р. тому`;
-
-};
-
-
-
 const Automation = () => {
+
   const theme = useTheme();
+
   const navigate = useNavigate();
+
   const location = useLocation();
+
   const { activeModals, openModal, closeModal: closeGlobalModal } = useModalManager();
-  const { leadSnapshot, updateLeadSnapshot, pushNotification } = useAuth();
+
+  const { leadSnapshot, updateLeadSnapshot, pushNotification, user } = useAuth();
+
   const { data, loading, error, refresh } = useLeadData(leadSnapshot, updateLeadSnapshot);
 
+
+
   const [searchTerm, setSearchTerm] = useState('');
+
+
 
   const [stageFilter, setStageFilter] = useState('all');
 
@@ -3450,38 +3256,56 @@ const Automation = () => {
         return;
       }
 
+      let targetStatus = status;
+
       const decidedAt = new Date().toISOString();
       setDecisions((prev) => ({
         ...prev,
         [getLeadKey(selectedLead)]: {
-          status,
+          status: targetStatus,
           decidedAt,
           rejectionReason,
         },
       }));
       setStatusError(null);
 
-      closeLocalModal();
+      if (targetStatus !== 'in_work' && targetStatus !== 'postponed') {
+        closeLocalModal();
+      }
 
       try {
+        let response;
         if (gmailId) {
-          await postLeadStatus({ 
+          response = await postLeadStatus({ 
             gmail_id: gmailId, 
-            status,
+            status: targetStatus,
             rejection_reason: rejectionReason 
           });
         } else {
-          await postLeadStatus({ 
+          response = await postLeadStatus({ 
             row_number: rowNumber, 
-            status,
+            status: targetStatus,
             rejection_reason: rejectionReason 
           });
         }
+        
+        // Update local selected lead status so UI updates immediately
+        const finalStatusFromServer = response?.status || targetStatus;
+        setSelectedLead(prev => prev ? { ...prev, status: finalStatusFromServer } : null);
+
         await refresh({ isManualRefresh: true });
+
+        if (targetStatus === 'postponed') {
+          closeLocalModal();
+          setSelectedLead(null);
+          setShowReader(false);
+          navigate('/work-zone', { replace: true });
+        }
+
         pushNotification({
           variant: 'success',
           title: 'Статус оновлено',
-          message: `Статус змінено на "${DECISION_LABELS[status]}"${rejectionReason ? ` з причиною: ${rejectionReason}` : ''}`,
+          message: `Статус змінено на "${BADGE_LABELS[targetStatus] || targetStatus}"${rejectionReason ? ` з причиною: ${rejectionReason}` : ''}`,
         });
       } catch (error) {
         setDecisions((prev) => {
@@ -3493,8 +3317,10 @@ const Automation = () => {
         setStatusError(error instanceof Error ? error.message : 'Не вдалося оновити статус.');
       }
     },
-    [selectedLead, closeModal, refresh, pushNotification, closeLocalModal]
+    [selectedLead, refresh, pushNotification, closeLocalModal, navigate]
   );
+
+  const handleDecision = useCallback((status) => handleDecisionWithReason(status, null), [handleDecisionWithReason]);
 
   const handleConfirmClick = useCallback(async () => {
 
@@ -3839,17 +3665,17 @@ const Automation = () => {
                       tabIndex={0}
                     >
 
-                      <td>
-
-                        <LeadName>{displayName}</LeadName>
-
-                        <LeadEmail>{lead.email || 'email не вказано'}</LeadEmail>
-
-                        {lead._messagesFromEmail > 1 && <LeadMeta>Останній лист • ще {lead._messagesFromEmail - 1} з цього email</LeadMeta>}
-
-                        {lead.person_summary && <LeadMeta>{lead.person_summary}</LeadMeta>}
-
-                      </td>
+                  <td>
+                    <LeadName>{displayName}</LeadName>
+                    <LeadEmail>{lead.email || 'email не вказано'}</LeadEmail>
+                    {lead.assigned_username && (
+                      <LeadMeta style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                        👤 Менеджер: {lead.assigned_username}
+                      </LeadMeta>
+                    )}
+                    {lead._messagesFromEmail > 1 && <LeadMeta>Останній лист • ще {lead._messagesFromEmail - 1} з цього email</LeadMeta>}
+                    {lead.person_summary && <LeadMeta>{lead.person_summary}</LeadMeta>}
+                  </td>
 
                       <td>
 
@@ -4287,33 +4113,47 @@ const Automation = () => {
                     </FooterSecondaryActions>
 
                     <FooterPrimaryActions>
-
-                      <ActionButton type="button" $variant="snooze" onClick={() => handleDecision('snoozed')}>
-
-                        Відкласти
-
-                      </ActionButton>
-
-                      <ActionButton type="button" $variant="reject" onClick={() => handleDecision('rejected')}>
-
-                        Відхилити
-
-                      </ActionButton>
-
                       <ActionButton
-
                         type="button"
-
-                        $variant="confirm"
-
-                        onClick={handleConfirmClick}
-
-                        disabled={replyLoading}
-
+                        $variant="generate"
+                        onClick={() => handleDecision('in_work')}
+                        disabled={(selectedLead.status || '').toLowerCase() === 'in_work'}
                       >
-                        {replyLoading ? 'Генеруємо...' : 'Підтвердити'}
+                        Взяти в роботу
                       </ActionButton>
 
+                      {(() => {
+                        const isManager = (user?.role || 'manager') === 'manager';
+                        const isInWork = (selectedLead.status || '').toLowerCase() === 'in_work';
+                        const showSecondaryActions = !isManager || isInWork;
+
+                        if (!showSecondaryActions) return null;
+
+                        return (
+                          <>
+                            <ActionButton
+                              type="button"
+                              $variant="snooze"
+                              onClick={() => handleDecision('postponed')}
+                            >
+                              Відкласти
+                            </ActionButton>
+
+                            <ActionButton type="button" $variant="reject" onClick={() => handleDecision('rejected')}>
+                              Відхилити
+                            </ActionButton>
+
+                            <ActionButton
+                              type="button"
+                              $variant="confirm"
+                              onClick={handleConfirmClick}
+                              disabled={replyLoading}
+                            >
+                              {replyLoading ? 'Генеруємо...' : 'Підтвердити'}
+                            </ActionButton>
+                          </>
+                        );
+                      })()}
                     </FooterPrimaryActions>
 
                   </ModalFooter>

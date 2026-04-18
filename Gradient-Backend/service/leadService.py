@@ -102,7 +102,7 @@ def assign_lead_to_user(gmail_id: str, user_info: dict):
     return {"message": "Lead assigned successfully", "gmail_id": gmail_id, "assigned_to": user_info["username"], "status": "ASSIGNED"}
 
 def get_user_leads(user_info: dict, limit: int = 120):
-    """Get leads based on user role - admin sees all, manager sees assigned or available"""
+    """Get leads based on user role - admin sees all, manager sees their work or available ones"""
     if not user_info:
         return []
         
@@ -127,56 +127,86 @@ def get_user_leads(user_info: dict, limit: int = 120):
             leads = conn.execute(query, [limit]).fetchall()
         
     elif user_role == "manager":
-        # Manager sees all leads with assignment info (same as admin)
-        query = """
-            SELECT 
-                gm.gmail_id, gm.status, gm.first_name, gm.last_name, gm.full_name, gm.email, gm.subject, 
-                gm.received_at, gm.company, gm.body, gm.phone, gm.website, gm.company_name, gm.company_info,
-                gm.person_role, gm.person_links, gm.person_location, gm.person_experience, gm.person_summary,
-                gm.person_insights, gm.company_insights, gm.assigned_to, gm.assigned_at, gm.synced_at, gm.created_at,
-                u.username as assigned_username, u.role as assigned_role
-            FROM gmail_messages gm
-            LEFT JOIN users u ON gm.assigned_to = u.id
-            ORDER BY gm.created_at DESC
-            LIMIT ?
-        """
-        leads = conn.execute(query, [limit]).fetchall()
+        # Manager logic:
+        # 1. If manager has ANY lead with status 'IN_WORK', they only see THAT lead.
+        # 2. Otherwise, they see all leads EXCEPT those taken 'IN_WORK' by other managers.
+        
+        with db_lock:
+            # Check if this manager has ANY lead with status 'IN_WORK'
+            my_in_work = conn.execute(
+                "SELECT gmail_id FROM gmail_messages WHERE assigned_to = ? AND UPPER(status) = 'IN_WORK'",
+                [user_id]
+            ).fetchone()
+            
+            if my_in_work:
+                # Show ONLY the lead they are currently working on
+                query = """
+                    SELECT 
+                        gm.gmail_id, gm.status, gm.first_name, gm.last_name, gm.full_name, gm.email, gm.subject, 
+                        gm.received_at, gm.company, gm.body, gm.phone, gm.website, gm.company_name, gm.company_info,
+                        gm.person_role, gm.person_links, gm.person_location, gm.person_experience, gm.person_summary,
+                        gm.person_insights, gm.company_insights, gm.assigned_to, gm.assigned_at, gm.synced_at, gm.created_at,
+                        u.username as assigned_username, u.role as assigned_role
+                    FROM gmail_messages gm
+                    LEFT JOIN users u ON gm.assigned_to = u.id
+                    WHERE gm.gmail_id = ?
+                """
+                leads = conn.execute(query, [my_in_work[0]]).fetchall()
+            else:
+                # Show all leads EXCEPT those IN_WORK by other managers
+                query = """
+                    SELECT 
+                        gm.gmail_id, gm.status, gm.first_name, gm.last_name, gm.full_name, gm.email, gm.subject, 
+                        gm.received_at, gm.company, gm.body, gm.phone, gm.website, gm.company_name, gm.company_info,
+                        gm.person_role, gm.person_links, gm.person_location, gm.person_experience, gm.person_summary,
+                        gm.person_insights, gm.company_insights, gm.assigned_to, gm.assigned_at, gm.synced_at, gm.created_at,
+                        u.username as assigned_username, u.role as assigned_role
+                    FROM gmail_messages gm
+                    LEFT JOIN users u ON gm.assigned_to = u.id
+                    WHERE gm.status IS NULL 
+                       OR UPPER(gm.status) != 'IN_WORK' 
+                       OR gm.assigned_to = ?
+                    ORDER BY gm.created_at DESC
+                    LIMIT ?
+                """
+                leads = conn.execute(query, [user_id, limit]).fetchall()
     else:
         return []
     
     # Format results
     formatted_leads = []
-    for lead in leads:
-        formatted_lead = {
-            "gmail_id": lead[0],
-            "status": lead[1],
-            "first_name": lead[2],
-            "last_name": lead[3],
-            "full_name": lead[4],
-            "email": lead[5],
-            "subject": lead[6],
-            "received_at": lead[7],
-            "company": lead[8],
-            "body": lead[9],
-            "phone": lead[10],
-            "website": lead[11],
-            "company_name": lead[12],
-            "company_info": lead[13],
-            "person_role": lead[14],
-            "person_links": lead[15],
-            "person_location": lead[16],
-            "person_experience": lead[17],
-            "person_summary": lead[18],
-            "person_insights": lead[19],
-            "company_insights": lead[20],
-            "assigned_to": lead[21],
-            "assigned_at": lead[22],
-            "synced_at": lead[23],
-            "created_at": lead[24],
-            "assigned_username": lead[25],
-            "assigned_role": lead[26],
-        }
-        formatted_leads.append(formatted_lead)
+    with db_lock:
+        for lead in leads:
+            formatted_lead = {
+                "gmail_id": lead[0],
+                "status": lead[1] or "NEW",
+                "first_name": lead[2] or "",
+                "last_name": lead[3] or "",
+                "full_name": lead[4] or "",
+                "email": lead[5] or "",
+                "subject": lead[6] or "",
+                "received_at": lead[7] or "",
+                "company": lead[8] or "",
+                "body": lead[9] or "",
+                "phone": lead[10] or "",
+                "website": lead[11] or "",
+                "company_name": lead[12] or "",
+                "company_info": lead[13] or "",
+                "person_role": lead[14] or "",
+                "person_links": lead[15] or "",
+                "person_location": lead[16] or "",
+                "person_experience": lead[17] or "",
+                "person_summary": lead[18] or "",
+                "person_insights": lead[19] or [],
+                "company_insights": lead[20] or [],
+                "assigned_to": lead[21],
+                "assigned_at": lead[22],
+                "synced_at": lead[23],
+                "created_at": lead[24],
+                "assigned_username": lead[25],
+                "assigned_role": lead[26],
+            }
+            formatted_leads.append(formatted_lead)
     
     return formatted_leads
 

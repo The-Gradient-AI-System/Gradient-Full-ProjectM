@@ -102,8 +102,8 @@ def generate_replies(payload: ReplyGenerationRequest):
 
 
 # Unified status system - supporting both old and new status values
-VALID_STATUSES = {'NEW', 'ASSIGNED', 'EMAIL_SENT', 'WAITING_REPLY', 'REPLY_READY', 'CLOSED', 'LOST', 'SNOOZED', 'CONFIRMED', 'REJECTED'}
-ALLOWED_STATUS_VALUES = {"confirmed", "rejected", "snoozed", "waiting", "new"}
+VALID_STATUSES = {'NEW', 'ASSIGNED', 'EMAIL_SENT', 'WAITING_REPLY', 'REPLY_READY', 'CLOSED', 'LOST', 'SNOOZED', 'CONFIRMED', 'REJECTED', 'POSTPONED', 'IN_WORK'}
+ALLOWED_STATUS_VALUES = {"confirmed", "rejected", "snoozed", "waiting", "new", "postponed", "in_work"}
 
 class LeadStatusUpdateRequest(BaseModel):
     row_number: int | None = Field(gt=0, default=None)
@@ -151,24 +151,62 @@ def set_lead_status(payload: LeadStatusUpdateRequest, user_info: dict = Depends(
         if payload.gmail_id:
             # Check if lead exists
             lead = conn.execute(
-                "SELECT gmail_id, assigned_to FROM gmail_messages WHERE gmail_id = ?",
+                "SELECT gmail_id, assigned_to, status FROM gmail_messages WHERE gmail_id = ?",
                 [payload.gmail_id]
             ).fetchone()
             
             if not lead:
                 raise HTTPException(status_code=404, detail="Lead not found")
+
+            lead_assigned_to = lead[1]
+            lead_status = (lead[2] or "").upper()
+
+            # Role-based rules
+            if user_info and user_info.get("role") == "manager":
+                user_id = user_info.get("id")
+
+                # Managers can take in work only if not already in work by someone else.
+                if final_status == "IN_WORK":
+                    if lead_assigned_to is not None and lead_assigned_to != user_id and lead_status == "IN_WORK":
+                        raise HTTPException(status_code=409, detail="Lead is already in work by another manager")
+
+                # For any other status change (including POSTPONED), manager must own the lead (assigned_to == me)
+                # to prevent updating someone else's lead.
+                if final_status != "IN_WORK":
+                    if lead_assigned_to is None or lead_assigned_to != user_id:
+                        raise HTTPException(status_code=403, detail="You can update only leads that are in your work")
             
             # Update status in database
-            conn.execute(
-                "UPDATE gmail_messages SET status = ? WHERE gmail_id = ?",
-                [final_status, payload.gmail_id]
-            )
+            if final_status == "POSTPONED":
+                # Unassign when postponing so others can see it (as requested)
+                conn.execute(
+                    "UPDATE gmail_messages SET status = 'POSTPONED', assigned_to = NULL, assigned_at = NULL WHERE gmail_id = ?",
+                    [payload.gmail_id]
+                )
+            elif final_status == "IN_WORK":
+                # Ensure it's assigned to the person who took it in work
+                conn.execute(
+                    "UPDATE gmail_messages SET status = 'IN_WORK', assigned_to = ?, assigned_at = ? WHERE gmail_id = ?",
+                    [user_info["id"], datetime.now(), payload.gmail_id]
+                )
+            else:
+                conn.execute(
+                    "UPDATE gmail_messages SET status = ? WHERE gmail_id = ?",
+                    [final_status, payload.gmail_id]
+                )
             
             # Add to history
             assignee = user_info.get("username") if user_info else None
             add_status_history(payload.gmail_id, final_status, assignee, payload.rejection_reason)
             
             conn.commit()
+            
+            # Re-fetch the record to ensure changes are committed and visible
+            updated_lead = conn.execute(
+                "SELECT status, assigned_to FROM gmail_messages WHERE gmail_id = ?",
+                [payload.gmail_id]
+            ).fetchone()
+            print(f"[DEBUG] Lead {payload.gmail_id} updated to status: {updated_lead[0]}, assigned_to: {updated_lead[1]}")
             
             return {
                 "gmail_id": payload.gmail_id,
