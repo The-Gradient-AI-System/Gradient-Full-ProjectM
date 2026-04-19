@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import styled, { useTheme } from 'styled-components';
+import styled from 'styled-components';
 import { FiCamera, FiEye, FiEyeOff } from 'react-icons/fi';
 import userAvatar from '../assets/user.jpg';
+import { getMyProfile, setAuthToken, updateMyProfile } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 
 const PageWrapper = styled.section`
   width: 100%;
@@ -175,21 +177,47 @@ const SuccessBadge = styled.span`
   background: rgba(22, 219, 101, 0.12);
 `;
 
-const Profile = () => {
-  const theme = useTheme();
-  const fileInputRef = useRef(null);
-  const previewUrlRef = useRef(null);
-  const [avatar, setAvatar] = useState(userAvatar);
-  const [email, setEmail] = useState('email@example.com');
-  const [password, setPassword] = useState('password123');
-  const [showPassword, setShowPassword] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState(null);
+const ErrorBadge = styled(SuccessBadge)`
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.14);
+`;
 
-  useEffect(() => () => {
-    if (previewUrlRef.current) {
-      URL.revokeObjectURL(previewUrlRef.current);
-    }
+const Profile = () => {
+  const fileInputRef = useRef(null);
+  const { user, setUser } = useAuth();
+  const [avatar, setAvatar] = useState(userAvatar);
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadProfile = async () => {
+      try {
+        const profile = await getMyProfile();
+        if (cancelled || !profile) return;
+        setUsername(profile.username || '');
+        setEmail(profile.email || '');
+        setAvatar(profile.avatar_url || userAvatar);
+      } catch (err) {
+        if (!cancelled) setError('Не вдалося завантажити профіль.');
+      }
+    };
+    loadProfile();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    if (user?.avatar_url) {
+      setAvatar(user.avatar_url);
+    }
+  }, [user?.avatar_url]);
 
   const triggerFilePicker = () => {
     fileInputRef.current?.click();
@@ -199,19 +227,48 @@ const Profile = () => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (previewUrlRef.current) {
-      URL.revokeObjectURL(previewUrlRef.current);
-    }
-
-    const previewUrl = URL.createObjectURL(file);
-    previewUrlRef.current = previewUrl;
-    setAvatar(previewUrl);
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setAvatar(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
     setLastSavedAt(null);
+    setError('');
   };
 
-  const handleSubmit = event => {
+  const handleSubmit = async event => {
     event.preventDefault();
-    setLastSavedAt(new Date());
+    setLoading(true);
+    setError('');
+    try {
+      const payload = {
+        username: username.trim(),
+        email: email.trim(),
+        avatar_url: avatar || '',
+      };
+      if (password.trim()) {
+        payload.password = password.trim();
+      }
+      const updated = await updateMyProfile(payload);
+      if (updated?.access_token) {
+        setAuthToken(updated.access_token);
+      }
+      setUser((prev) => ({
+        ...(prev || {}),
+        username: updated?.username || payload.username,
+        email: updated?.email || payload.email,
+        role: updated?.role || prev?.role || 'manager',
+        avatar_url: updated?.avatar_url || payload.avatar_url,
+      }));
+      setPassword('');
+      setLastSavedAt(new Date());
+    } catch (err) {
+      setError(err?.message || 'Не вдалося оновити профіль.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -234,6 +291,23 @@ const Profile = () => {
 
         <Form onSubmit={handleSubmit}>
           <Field>
+            Імʼя:
+            <InputShell>
+              <Input
+                type="text"
+                value={username}
+                onChange={event => {
+                  setUsername(event.target.value);
+                  setLastSavedAt(null);
+                }}
+                placeholder="Введіть ім'я"
+                required
+                autoComplete="name"
+              />
+            </InputShell>
+          </Field>
+
+          <Field>
             Email:
             <InputShell>
               <Input
@@ -242,9 +316,11 @@ const Profile = () => {
                 onChange={event => {
                   setEmail(event.target.value);
                   setLastSavedAt(null);
+                  setError('');
                 }}
                 placeholder="email@example.com"
                 required
+                autoComplete="email"
               />
             </InputShell>
           </Field>
@@ -258,9 +334,11 @@ const Profile = () => {
                 onChange={event => {
                   setPassword(event.target.value);
                   setLastSavedAt(null);
+                  setError('');
                 }}
                 minLength={6}
-                required
+                placeholder="Новий пароль (за потреби)"
+                autoComplete="new-password"
               />
               <EyeButton
                 type="button"
@@ -272,10 +350,13 @@ const Profile = () => {
             </InputShell>
           </Field>
 
-          <SubmitButton type="submit">Змінити</SubmitButton>
+          <SubmitButton type="submit" disabled={loading || !username.trim() || !email.trim()}>
+            {loading ? 'Збереження...' : 'Змінити'}
+          </SubmitButton>
         </Form>
 
-        <HelperText>Зміни буде синхронізовано після підключення бекенду.</HelperText>
+        <HelperText>Оновіть імʼя, email, пароль та фото профілю.</HelperText>
+        {error && <ErrorBadge>{error}</ErrorBadge>}
         {lastSavedAt && (
           <SuccessBadge>
             Збережено о {lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

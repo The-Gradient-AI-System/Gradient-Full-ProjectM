@@ -10,6 +10,7 @@ from email.mime.text import MIMEText
 from email import encoders
 
 from service.gmailService import get_gmail_service
+from db import conn, db_lock
 
 router = APIRouter(prefix="/email", tags=["Email"])
 
@@ -56,6 +57,27 @@ async def send_email_with_attachments(
             .send(userId="me", body={"raw": raw})
             .execute()
         )
+
+        # Persist outgoing reply snippet for Leads History (best-effort).
+        try:
+            with db_lock:
+                row = conn.execute(
+                    "SELECT gmail_id FROM gmail_messages WHERE email = ? ORDER BY created_at DESC LIMIT 1",
+                    [to],
+                ).fetchone()
+                if row:
+                    conn.execute(
+                        """
+                        UPDATE gmail_messages
+                        SET last_reply_subject = ?, last_reply_body = ?, last_replied_at = CURRENT_TIMESTAMP
+                        WHERE gmail_id = ?
+                        """,
+                        [subject, body, row[0]],
+                    )
+                    conn.commit()
+        except Exception:
+            # Don't fail the request if logging fails.
+            pass
 
         return JSONResponse(
             {

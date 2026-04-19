@@ -25,6 +25,7 @@ class ManagerCreatePayload(BaseModel):
     username: str = Field(min_length=1)
     email: EmailStr
     password: str = Field(min_length=6)
+    avatar_url: str | None = None
 
 
 class ManagerStatusPayload(BaseModel):
@@ -40,7 +41,7 @@ def list_managers(_: dict = Depends(require_admin)):
     with db_lock:
         rows = conn.execute(
             """
-            SELECT id, username, email, role, is_active
+            SELECT id, username, email, role, is_active, avatar_url
             FROM users
             WHERE role = 'manager'
             ORDER BY id ASC
@@ -55,6 +56,7 @@ def list_managers(_: dict = Depends(require_admin)):
                 "email": row[2],
                 "role": row[3],
                 "is_active": bool(row[4]),
+                "avatar_url": row[5] or "",
             }
             for row in rows
         ]
@@ -78,10 +80,10 @@ def create_manager(payload: ManagerCreatePayload, _: dict = Depends(require_admi
 
         conn.execute(
             """
-            INSERT INTO users (id, username, email, password, role, is_active)
-            VALUES (?, ?, ?, ?, 'manager', TRUE)
+            INSERT INTO users (id, username, email, password, role, is_active, avatar_url)
+            VALUES (?, ?, ?, ?, 'manager', TRUE, ?)
             """,
-            [next_id, payload.username, str(payload.email), hashed_pwd],
+            [next_id, payload.username, str(payload.email), hashed_pwd, (payload.avatar_url or "").strip()],
         )
         conn.commit()
 
@@ -91,6 +93,7 @@ def create_manager(payload: ManagerCreatePayload, _: dict = Depends(require_admi
         "email": str(payload.email),
         "role": "manager",
         "is_active": True,
+        "avatar_url": (payload.avatar_url or "").strip(),
     }
 
 
