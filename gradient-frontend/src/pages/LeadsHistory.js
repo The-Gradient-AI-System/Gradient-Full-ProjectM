@@ -166,6 +166,13 @@ const Snippet = styled.div`
   overflow: hidden;
 `;
 
+const ReplySnippet = styled(Snippet)`
+  margin-top: 0.65rem;
+  opacity: 0.92;
+  border-left: 2px solid rgba(104, 123, 255, 0.55);
+  padding-left: 0.85rem;
+`;
+
 const Empty = styled.div`
   border-radius: 18px;
   border: 1px dashed rgba(255, 255, 255, 0.18);
@@ -389,6 +396,11 @@ const LeadsHistory = () => {
                     ) : null}
                   </Meta>
                   <Snippet>{snippet}</Snippet>
+                  {!!(lead.last_reply_body || '').trim() && (
+                    <ReplySnippet>
+                      <strong>Відповідь:</strong> {(lead.last_reply_body || '').trim()}
+                    </ReplySnippet>
+                  )}
                   <StatusRow>
                     <StatusLabel>{progress.label}</StatusLabel>
                     <StatusBar aria-label={`Статус: ${progress.label}`}>

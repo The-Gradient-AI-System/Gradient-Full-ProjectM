@@ -190,7 +190,7 @@ const UserButton = styled.button`
 
 const UserDropdown = styled.div`
 
-  ${({ closing }) => closing && 'pointer-events: none;'}
+  ${({ $closing }) => $closing && 'pointer-events: none;'}
 
   position: absolute;
 
@@ -214,7 +214,7 @@ const UserDropdown = styled.div`
 
   animation: ${dropdownAppear} 0.22s ease-out forwards;
 
-  ${({ closing }) => closing && 'animation-direction: reverse; pointer-events: none;'}
+  ${({ $closing }) => $closing && 'animation-direction: reverse; pointer-events: none;'}
 
 `;
 
@@ -492,7 +492,7 @@ const Header = () => {
 
           <UserAvatar>
 
-            <AvatarImage src={userAvatar} alt="User avatar" />
+            <AvatarImage src={user?.avatar_url || userAvatar} alt="User avatar" />
 
             <StatusIndicator />
 
@@ -502,13 +502,13 @@ const Header = () => {
 
         {(open || closing) && (
 
-          <UserDropdown closing={closing}>
+          <UserDropdown $closing={closing}>
 
             <UserTop>
 
               <UserAvatar>
 
-                <AvatarImage src={userAvatar} alt="User avatar" />
+                <AvatarImage src={user?.avatar_url || userAvatar} alt="User avatar" />
 
                 <StatusIndicator />
 
@@ -516,7 +516,7 @@ const Header = () => {
 
               <UserTopInfo>
 
-                <h4>{user?.email || 'User'}</h4>
+                <h4>{user?.username || user?.email || 'User'}</h4>
 
                 <span>{user?.role === 'admin' ? 'Адміністратор' : 'Менеджер'}</span>
 

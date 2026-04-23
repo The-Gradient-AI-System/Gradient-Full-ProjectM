@@ -44,25 +44,58 @@ const DashboardGrid = styled.div`
 
 const KpiGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
   gap: 1.05rem;
   margin-bottom: 1.05rem;
+  @media (max-width: 1120px) {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
   @media (max-width: 680px) {
     grid-template-columns: 1fr;
   }
 `;
 
 const BreakdownGrid = styled(DashboardGrid)`
-  margin-top: 1.05rem;
+  margin-top: 0;
 `;
 
-const FilterBar = styled.div`
+/** Смуга вибору періоду (фільтр зліва) */
+const HeroCard = styled(Card)`
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 1rem;
+`;
+
+const HeroToolbar = styled.div`
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
-  gap: 1rem;
-  margin-bottom: 1.2rem;
-  padding: 0.4rem 0.6rem;
+  justify-content: flex-start;
+  gap: 0.85rem 1rem;
+`;
+
+const HeroToolbarHint = styled.span`
+  font-size: 0.88rem;
+  color: ${({ theme }) => theme.colors.subtleText};
+  font-weight: 500;
+  margin-left: auto;
+  text-align: right;
+  max-width: min(100%, 280px);
+  line-height: 1.35;
+`;
+
+const ManagerSelect = styled.select`
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  outline: none;
+  cursor: pointer;
+
+  option {
+    color: #0f172a;
+  }
 `;
 
 const FilterGroup = styled.div`
@@ -96,6 +129,18 @@ const FilterButton = styled.button`
 const PendingCard = styled(Card)`
   margin-top: 1.2rem;
   cursor: default;
+`;
+
+const PendingHint = styled.div`
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.5);
+  max-width: 340px;
+  line-height: 1.45;
+  text-align: right;
+  @media (max-width: 720px) {
+    text-align: left;
+    max-width: none;
+  }
 `;
 
 const PendingGroupList = styled.div`
@@ -263,6 +308,98 @@ const StatCard = styled(Card)`
 
 const chartColors = ['#5f7dff', '#51d7aa', '#ffb969', '#ff7d9c'];
 
+const statusLabelUa = (status) => {
+  const key = String(status || '').toLowerCase();
+  const map = {
+    new: 'новий',
+    waiting: 'очікує',
+    call_lead: 'потрібен дзвінок',
+    confirmed: 'підтверджено',
+    rejected: 'відхилено',
+    snoozed: 'відкладено',
+    postponed: 'перенесено',
+    in_work: 'в роботі',
+    assigned: 'призначено',
+    email_sent: 'лист надіслано',
+    closed: 'закрито',
+    lost: 'втрачено',
+  };
+  return map[key] || key || '—';
+};
+
+const parseLeadReceived = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const ActionListWrap = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+  }
+`;
+
+const ActionRowBox = styled.div`
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.7rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+`;
+
+const ActionRowTop = styled.div`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+`;
+
+const ActionReason = styled.span`
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+`;
+
+const ActionOpenBtn = styled.button`
+  align-self: flex-start;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: 1px solid rgba(104, 123, 255, 0.45);
+  background: rgba(104, 123, 255, 0.18);
+  color: #fff;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: rgba(104, 123, 255, 0.32);
+    border-color: rgba(104, 123, 255, 0.75);
+  }
+`;
+
+const ActionSub = styled.div`
+  font-size: 0.85rem;
+  color: ${({ theme }) => theme.colors.subtleText};
+  line-height: 1.35;
+`;
+
 const AnalyticsManager = () => {
   const navigate = useNavigate();
   const { activeModals, openModal, closeModal } = useModalManager();
@@ -271,6 +408,7 @@ const AnalyticsManager = () => {
   const [pendingGroups, setPendingGroups] = useState([]);
   const [drilldownStatus, setDrilldownStatus] = useState(null);
   const [rangeKey, setRangeKey] = useState('all');
+  const [selectedManager, setSelectedManager] = useState('all');
   const { leadSnapshot, updateLeadSnapshot } = useAuth();
   const didHydrateRef = useRef(false);
 
@@ -306,42 +444,144 @@ const AnalyticsManager = () => {
     })();
   }, [updateLeadSnapshot, rangeDays]);
 
+  const managerOptions = useMemo(() => {
+    const names = Array.from(
+      new Set(
+        (leads || [])
+          .map((lead) => lead.assigned_username || 'Не призначено')
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+    return ['all', ...names];
+  }, [leads]);
+
+  const filteredLeads = useMemo(() => {
+    if (selectedManager === 'all') return leads;
+    return leads.filter((lead) => (lead.assigned_username || 'Не призначено') === selectedManager);
+  }, [leads, selectedManager]);
+
+  const filteredPendingGroups = useMemo(() => {
+    if (selectedManager === 'all') return pendingGroups;
+    return (pendingGroups || []).map((group) => {
+      const leadsInGroup = (group.leads || []).filter(
+        (lead) => (lead.assigned_username || 'Не призначено') === selectedManager
+      );
+      return {
+        ...group,
+        leads: leadsInGroup,
+        count: leadsInGroup.length,
+      };
+    });
+  }, [pendingGroups, selectedManager]);
+
   const statusDistribution = useMemo(() => {
     const map = {};
-    leads.forEach((lead) => {
+    filteredLeads.forEach((lead) => {
       const key = (lead.status || 'NEW').toUpperCase();
       map[key] = (map[key] || 0) + 1;
     });
     return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [leads]);
+  }, [filteredLeads]);
 
   const managerStatuses = useMemo(() => {
     const map = {};
-    leads.forEach((lead) => {
-      const manager = lead.assigned_username || 'Unassigned';
+    filteredLeads.forEach((lead) => {
+      const manager = lead.assigned_username || 'Не призначено';
       if (!map[manager]) map[manager] = 0;
       map[manager] += 1;
     });
     return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [leads]);
+  }, [filteredLeads]);
 
   const drilldownLeads = useMemo(() => {
     if (!drilldownStatus) return [];
     const key = String(drilldownStatus || '').toUpperCase();
-    return leads.filter((lead) => String((lead.status || 'NEW')).toUpperCase() === key);
-  }, [drilldownStatus, leads]);
+    return filteredLeads.filter((lead) => String((lead.status || 'NEW')).toUpperCase() === key);
+  }, [drilldownStatus, filteredLeads]);
 
   const activityDynamics = metrics.month || [];
   const statusOverTime = metrics.line || [];
 
   const kpis = useMemo(() => {
-    const active = Number(metrics.stats?.active ?? 0);
-    const completed = Number(metrics.stats?.completed ?? 0);
+    const isFinal = (status) =>
+      ['CONFIRMED', 'REJECTED', 'CLOSED', 'LOST', 'EMAIL_SENT'].includes(
+        String(status || '').toUpperCase()
+      );
+    const active = filteredLeads.filter((lead) => !isFinal(lead.status)).length;
+    const completed = filteredLeads.length;
+    const totalEmailsAllTime =
+      selectedManager === 'all'
+        ? Number(metrics.stats?.total_emails_all_time ?? completed)
+        : completed;
     return [
       { label: 'Кількість Активних Проєктів', value: active, hint: 'в роботі' },
       { label: 'Завершені Проєкти', value: completed, hint: 'за цей період' },
+      { label: 'Листів за весь час', value: totalEmailsAllTime, hint: 'усі в базі' },
     ];
-  }, [metrics.stats]);
+  }, [filteredLeads, metrics.stats, selectedManager]);
+
+  const completionPct = useMemo(() => {
+    if (!kpis[1]?.value) return 0;
+    return Math.round(((kpis[1].value - kpis[0].value) / kpis[1].value) * 100);
+  }, [kpis]);
+
+  /** Очікує >3 дні, потрібен дзвінок, новий без відповіді — до 10 унікальних лідів */
+  const priorityActionLeads = useMemo(() => {
+    const now = Date.now();
+    const scored = [];
+
+    filteredLeads.forEach((lead) => {
+      const st = String(lead.status || '').toLowerCase();
+      const db = String(lead.status || '').toUpperCase();
+      const dt = parseLeadReceived(lead.received_at);
+      const ts = dt ? dt.getTime() : 0;
+      const daysSince = dt ? (now - ts) / 86400000 : 0;
+      const hasReply = !!(lead.last_reply_body && String(lead.last_reply_body).trim());
+
+      let tier = null;
+      let reason = '';
+      /** sortKey: для tier 1 менше = старіше (пріоритетніші прострочені) */
+      let sortKey = 0;
+
+      if (st === 'waiting' && daysSince > 3) {
+        tier = 1;
+        reason = 'Очікує >3 дні';
+        sortKey = ts || Number.MAX_SAFE_INTEGER;
+      } else if (db === 'CALL_LEAD' || st === 'call_lead') {
+        tier = 2;
+        reason = 'Потрібен дзвінок';
+        sortKey = -ts;
+      } else {
+        const isNew = !st || st === 'new' || db === 'NEW';
+        if (isNew && !hasReply) {
+          tier = 3;
+          reason = 'Новий без відповіді';
+          sortKey = -ts;
+        }
+      }
+
+      if (tier != null) {
+        scored.push({ lead, tier, reason, sortKey });
+      }
+    });
+
+    scored.sort((a, b) => {
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      if (a.tier === 1) return a.sortKey - b.sortKey;
+      return a.sortKey - b.sortKey;
+    });
+
+    const seen = new Set();
+    const out = [];
+    for (const item of scored) {
+      const key = item.lead.gmail_id || item.lead.email || JSON.stringify(item.lead);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
+      if (out.length >= 10) break;
+    }
+    return out;
+  }, [filteredLeads]);
 
   const openChart = (id, title) =>
     openModal({ id: `chart-${id}`, type: 'chart_modal', props: { title, chartId: id } });
@@ -350,7 +590,7 @@ const AnalyticsManager = () => {
     openModal({
       id: `pending-${group?.key}`,
       type: 'pending_modal',
-      props: { title: `Pending: ${group?.label}`, group },
+      props: { title: `Очікують: ${group?.label}`, group },
     });
 
   const expanded = activeModals.filter((modal) => ['chart_modal', 'pending_modal'].includes(modal.type));
@@ -366,7 +606,7 @@ const AnalyticsManager = () => {
           <Modal onClick={(e) => e.stopPropagation()}>
             <Header>
               <h3>{title}</h3>
-              <Expand onClick={() => closeModal(item.id)}>Close</Expand>
+              <Expand onClick={() => closeModal(item.id)}>Закрити</Expand>
             </Header>
 
             <DrilldownList>
@@ -387,17 +627,17 @@ const AnalyticsManager = () => {
                     }}
                   >
                     <div style={{ display: 'flex', width: '100%', alignItems: 'flex-start' }}>
-                      <DrilldownTitle>{lead.full_name || lead.email || 'Lead'}</DrilldownTitle>
-                      <StatusBadgeMinimal $color={statusColor}>{status}</StatusBadgeMinimal>
+                      <DrilldownTitle>{lead.full_name || lead.email || 'Лід'}</DrilldownTitle>
+                      <StatusBadgeMinimal $color={statusColor}>{statusLabelUa(status)}</StatusBadgeMinimal>
                     </div>
                     <DrilldownMeta>
                       {lead.company || lead.company_name || '—'} · {lead.subject || 'Без теми'}
                       <br />
-                      Received: {lead.received_at || '—'}
+                      Отримано: {lead.received_at || '—'}
                     </DrilldownMeta>
                     {!!lead.rejection_reason && (
                       <DrilldownMeta style={{ marginTop: '4px', padding: '4px 8px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '6px', color: '#fca5a5' }}>
-                        Reason: {lead.rejection_reason}
+                        Причина: {lead.rejection_reason}
                       </DrilldownMeta>
                     )}
                   </DrilldownRow>
@@ -415,15 +655,15 @@ const AnalyticsManager = () => {
         <Modal onClick={(e) => e.stopPropagation()}>
           <Header>
             <h3>{title}</h3>
-            <Expand onClick={() => closeModal(item.id)}>Close</Expand>
+            <Expand onClick={() => closeModal(item.id)}>Закрити</Expand>
           </Header>
           <ResponsiveContainer width="100%" height="90%">
             {id === 'percentage' ? (
               <PieChart>
                 <Pie
                   data={[
-                    { name: 'done', value: Number(metrics.stats?.percentage ?? 0) },
-                    { name: 'rest', value: Math.max(0, 100 - Number(metrics.stats?.percentage ?? 0)) },
+                    { name: 'виконано', value: completionPct },
+                    { name: 'залишилось', value: Math.max(0, 100 - completionPct) },
                   ]}
                   dataKey="value"
                   innerRadius={120}
@@ -437,7 +677,7 @@ const AnalyticsManager = () => {
                   <Cell fill="rgba(255,255,255,0.12)" />
                 </Pie>
                 <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" fontSize="68" fill="currentColor">
-                  {Number(metrics.stats?.percentage ?? 0)}%
+                  {completionPct}%
                 </text>
                 <Tooltip />
               </PieChart>
@@ -494,22 +734,38 @@ const AnalyticsManager = () => {
 
   return (
     <>
-      <FilterBar>
-        <FilterGroup>
-          <FilterButton type="button" $active={rangeKey === 'all'} onClick={() => setRangeKey('all')}>
-            All time
-          </FilterButton>
-          <FilterButton type="button" $active={rangeKey === 'year'} onClick={() => setRangeKey('year')}>
-            Рік
-          </FilterButton>
-          <FilterButton type="button" $active={rangeKey === 'month'} onClick={() => setRangeKey('month')}>
-            Місяць
-          </FilterButton>
-          <FilterButton type="button" $active={rangeKey === 'week'} onClick={() => setRangeKey('week')}>
-            Тиждень
-          </FilterButton>
-        </FilterGroup>
-      </FilterBar>
+      <HeroCard>
+        <HeroToolbar>
+          <FilterGroup>
+            <FilterButton type="button" $active={rangeKey === 'all'} onClick={() => setRangeKey('all')}>
+              Весь час
+            </FilterButton>
+            <FilterButton type="button" $active={rangeKey === 'year'} onClick={() => setRangeKey('year')}>
+              Рік
+            </FilterButton>
+            <FilterButton type="button" $active={rangeKey === 'month'} onClick={() => setRangeKey('month')}>
+              Місяць
+            </FilterButton>
+            <FilterButton type="button" $active={rangeKey === 'week'} onClick={() => setRangeKey('week')}>
+              Тиждень
+            </FilterButton>
+          </FilterGroup>
+          <ManagerSelect
+            value={selectedManager}
+            onChange={(e) => {
+              setSelectedManager(e.target.value);
+              setDrilldownStatus(null);
+            }}
+          >
+            {managerOptions.map((manager) => (
+              <option key={manager} value={manager}>
+                {manager === 'all' ? 'Усі менеджери' : manager}
+              </option>
+            ))}
+          </ManagerSelect>
+          <HeroToolbarHint>Період для метрик нижче</HeroToolbarHint>
+        </HeroToolbar>
+      </HeroCard>
 
       <KpiGrid>
         {kpis.map((item) => (
@@ -525,14 +781,20 @@ const AnalyticsManager = () => {
         <Card>
           <Header>
             <h4>Відсоток виконання</h4>
-            <Expand onClick={() => openChart('percentage', 'Відсоток виконання')}>Expand</Expand>
+            <Expand onClick={() => openChart('percentage', 'Відсоток виконання')}>Розгорнути</Expand>
           </Header>
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie
                 data={[
-                  { name: 'Виконано', value: Number(metrics.stats?.percentage ?? 0) },
-                  { name: 'Залишилось', value: Math.max(0, 100 - Number(metrics.stats?.percentage ?? 0)) },
+                  {
+                    name: 'Виконано',
+                    value: completionPct,
+                  },
+                  {
+                    name: 'Залишилось',
+                    value: Math.max(0, 100 - completionPct),
+                  },
                 ]}
                 dataKey="value"
                 innerRadius={70}
@@ -546,7 +808,7 @@ const AnalyticsManager = () => {
                 <Cell fill="rgba(255,255,255,0.12)" />
               </Pie>
               <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" fontSize="44" fill="currentColor">
-                {Number(metrics.stats?.percentage ?? 0)}%
+                {completionPct}%
               </text>
               <Tooltip />
             </PieChart>
@@ -565,8 +827,8 @@ const AnalyticsManager = () => {
 
         <Card>
           <Header>
-            <h4>Lead Distribution</h4>
-            <Expand onClick={() => openChart('distribution', 'Lead Distribution')}>Expand</Expand>
+            <h4>Розподіл лідів</h4>
+            <Expand onClick={() => openChart('distribution', 'Розподіл лідів')}>Розгорнути</Expand>
           </Header>
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
@@ -606,8 +868,8 @@ const AnalyticsManager = () => {
 
         <Card>
           <Header>
-            <h4>Leads by manager</h4>
-            <Expand onClick={() => openChart('manager', 'Leads by manager')}>Expand</Expand>
+            <h4>Ліди за менеджерами</h4>
+            <Expand onClick={() => openChart('manager', 'Ліди за менеджерами')}>Розгорнути</Expand>
           </Header>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={managerStatuses}>
@@ -634,8 +896,8 @@ const AnalyticsManager = () => {
 
         <Card>
           <Header>
-            <h4>Activity Dynamics</h4>
-            <Expand onClick={() => openChart('dynamics', 'Activity Dynamics')}>Expand</Expand>
+            <h4>Динаміка активності</h4>
+            <Expand onClick={() => openChart('dynamics', 'Динаміка активності')}>Розгорнути</Expand>
           </Header>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={activityDynamics}>
@@ -663,8 +925,8 @@ const AnalyticsManager = () => {
 
         <Card>
           <Header>
-            <h4>Status over Time</h4>
-            <Expand onClick={() => openChart('status-time', 'Status over Time')}>Expand</Expand>
+            <h4>Статуси за період</h4>
+            <Expand onClick={() => openChart('status-time', 'Статуси за період')}>Розгорнути</Expand>
           </Header>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={statusOverTime}>
@@ -687,7 +949,47 @@ const AnalyticsManager = () => {
               <LegendDot $color={chartColors[3]} />
               Кваліфіковані (міс)
             </LegendItem>
-          </LegendRow>
+            </LegendRow>
+        </Card>
+
+        <Card>
+          <Header>
+            <h4>Топ пріоритетних лідів</h4>
+          </Header>
+          <ActionSub style={{ marginBottom: '0.25rem' }}>
+            До 10 контактів: очікує понад 3 дні, потрібен дзвінок або новий без відповіді.
+          </ActionSub>
+          {priorityActionLeads.length === 0 ? (
+            <ActionSub>Зараз немає лідів, що відповідають цим критеріям.</ActionSub>
+          ) : (
+            <ActionListWrap>
+              {priorityActionLeads.map(({ lead, reason }) => {
+                const name = lead.full_name || lead.email || 'Лід';
+                const email = lead.email || '';
+                return (
+                  <ActionRowBox key={lead.gmail_id || email || name}>
+                    <ActionRowTop>
+                      <DrilldownTitle style={{ fontSize: '0.98rem' }}>{name}</DrilldownTitle>
+                      <ActionReason>{reason}</ActionReason>
+                    </ActionRowTop>
+                    <ActionSub>
+                      {(lead.company || lead.company_name || '—') + ' · ' + (lead.subject || 'Без теми')}
+                      <br />
+                      Отримано: {lead.received_at || '—'}
+                    </ActionSub>
+                    {email ? (
+                      <ActionOpenBtn
+                        type="button"
+                        onClick={() => navigate('/work-zone', { state: { openLeadEmail: email } })}
+                      >
+                        Відкрити в Робочій зоні
+                      </ActionOpenBtn>
+                    ) : null}
+                  </ActionRowBox>
+                );
+              })}
+            </ActionListWrap>
+          )}
         </Card>
       </BreakdownGrid>
 
@@ -713,17 +1015,17 @@ const AnalyticsManager = () => {
                   }}
                 >
                   <div style={{ display: 'flex', width: '100%', alignItems: 'flex-start' }}>
-                    <DrilldownTitle>{lead.full_name || lead.email || 'Lead'}</DrilldownTitle>
-                    <StatusBadgeMinimal $color={statusColor}>{status}</StatusBadgeMinimal>
+                    <DrilldownTitle>{lead.full_name || lead.email || 'Лід'}</DrilldownTitle>
+                    <StatusBadgeMinimal $color={statusColor}>{statusLabelUa(status)}</StatusBadgeMinimal>
                   </div>
                   <DrilldownMeta>
                     {lead.company || lead.company_name || '—'} · {lead.subject || 'Без теми'}
                     <br />
-                    Received: {lead.received_at || '—'}
+                    Отримано: {lead.received_at || '—'}
                   </DrilldownMeta>
                   {!!lead.rejection_reason && (
                     <DrilldownMeta style={{ marginTop: '4px', padding: '4px 8px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '6px', color: '#fca5a5' }}>
-                      Reason: {lead.rejection_reason}
+                      Причина: {lead.rejection_reason}
                     </DrilldownMeta>
                   )}
                 </DrilldownRow>
@@ -733,17 +1035,14 @@ const AnalyticsManager = () => {
         </Card>
       )}
 
-      {/* Pending proposals section at the bottom */}
       <PendingCard>
         <Header>
-          <Title>Pending / hanging proposals</Title>
-          <div style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)' }}>
-            Пропозиції, що очікують відповіді більше 3-х днів
-          </div>
+          <Title>Пропозиції в очікуванні</Title>
+          <PendingHint>Пропозиції, що очікують відповіді більше 3-х днів</PendingHint>
         </Header>
         <PendingGroupList>
-          {pendingGroups.length > 0 ? (
-            pendingGroups.map((group) => (
+          {filteredPendingGroups.length > 0 ? (
+            filteredPendingGroups.map((group) => (
               <PendingGroupButton key={group.key} onClick={() => openPendingModal(group)}>
                 {group.label} <span className="count">{group.count}</span>
               </PendingGroupButton>

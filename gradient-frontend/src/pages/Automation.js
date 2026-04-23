@@ -718,7 +718,7 @@ const LeadMeta = styled.div`
 
 
 
-const RANGE_OPTIONS = [7, 14, 30];
+const RANGE_OPTIONS = [null, 7, 14, 30];
 
 const getRangeLabel = (days) => {
   if (days === 7) return '7 днів';
@@ -2592,14 +2592,9 @@ const Automation = () => {
 
         _receivedAt: parseDate(lead.received_at),
 
-        _score: getLeadCompletenessScore(lead),
-
       }))
 
       .sort((a, b) => {
-
-        if (a._score !== b._score) return b._score - a._score;
-
         const aTime = a._receivedAt ? a._receivedAt.getTime() : 0;
 
         const bTime = b._receivedAt ? b._receivedAt.getTime() : 0;
@@ -2608,101 +2603,12 @@ const Automation = () => {
 
       })
 
-      .map(({ _receivedAt, _score, ...rest }) => rest);
+      .map(({ _receivedAt, ...rest }) => rest);
 
   }, [leads]);
 
-
-
-  const dedupedLeads = useMemo(() => {
-
-    const byEmail = new Map();
-
-    const counts = new Map();
-
-
-
-    const keyFor = (lead) => {
-
-      const email = (lead?.email || '').trim().toLowerCase();
-
-      if (email) return `email:${email}`;
-
-      const gid = (lead?.gmail_id || '').trim();
-
-      return gid ? `gmail:${gid}` : `row:${lead?.sheet_row || lead?.sheetRow || ''}`;
-
-    };
-
-
-
-    orderedLeads.forEach((lead) => {
-
-      const key = keyFor(lead);
-
-      counts.set(key, (counts.get(key) || 0) + 1);
-
-
-
-      const current = byEmail.get(key);
-
-      if (!current) {
-
-        byEmail.set(key, lead);
-
-        return;
-
-      }
-
-
-
-      const currentDate = parseDate(current.received_at);
-
-      const nextDate = parseDate(lead.received_at);
-
-      const currentTime = currentDate ? currentDate.getTime() : 0;
-
-      const nextTime = nextDate ? nextDate.getTime() : 0;
-
-
-
-      if (nextTime > currentTime) {
-
-        byEmail.set(key, lead);
-
-        return;
-
-      }
-
-      if (nextTime === currentTime) {
-
-        const currentScore = getLeadCompletenessScore(current);
-
-        const nextScore = getLeadCompletenessScore(lead);
-
-        if (nextScore > currentScore) byEmail.set(key, lead);
-
-      }
-
-    });
-
-
-
-    return Array.from(byEmail.entries())
-
-      .map(([key, lead]) => ({ ...lead, _messagesFromEmail: counts.get(key) || 1 }))
-
-      .sort((a, b) => {
-
-        const aTime = (parseDate(a.received_at)?.getTime() || 0);
-
-        const bTime = (parseDate(b.received_at)?.getTime() || 0);
-
-        return bTime - aTime;
-
-      });
-
-  }, [orderedLeads]);
+  // Робоча зона: показуємо кожен лист окремо (без групування по email)
+  const visibleLeads = orderedLeads;
 
   const handleRowClick = useCallback(async (lead) => {
     setSelectedLead(lead);
@@ -2735,15 +2641,15 @@ const Automation = () => {
   // Effect to open lead if passed from Analytics
   useEffect(() => {
     const emailToOpen = location.state?.openLeadEmail;
-    if (emailToOpen && dedupedLeads.length > 0) {
-      const lead = dedupedLeads.find(l => l.email === emailToOpen);
+    if (emailToOpen && visibleLeads.length > 0) {
+      const lead = visibleLeads.find((l) => l.email === emailToOpen);
       if (lead) {
         // Clear state to avoid reopening on every render
         window.history.replaceState({}, document.title);
         handleRowClick(lead);
       }
     }
-  }, [location.state, dedupedLeads, handleRowClick]);
+  }, [location.state, visibleLeads, handleRowClick]);
 
   const filteredLeads = useMemo(() => {
 
@@ -2755,7 +2661,7 @@ const Automation = () => {
 
 
 
-    return dedupedLeads.filter((lead) => {
+    return visibleLeads.filter((lead) => {
 
       const leadDate = parseDate(lead.received_at);
 
@@ -2828,7 +2734,7 @@ const Automation = () => {
 
     });
 
-  }, [dedupedLeads, stageFilter, searchTerm, rangeFilter, decisions]);
+  }, [visibleLeads, stageFilter, searchTerm, rangeFilter, decisions]);
 
 
 
@@ -2864,7 +2770,7 @@ const Automation = () => {
 
 
 
-    dedupedLeads.forEach((lead) => {
+    visibleLeads.forEach((lead) => {
 
       const decisionStatus = decisions[getLeadKey(lead)]?.status;
 
@@ -2898,7 +2804,7 @@ const Automation = () => {
 
 
 
-    const total = dedupedLeads.length;
+    const total = visibleLeads.length;
 
     const processed = confirmed + rejected;
 
@@ -2924,7 +2830,7 @@ const Automation = () => {
 
     };
 
-  }, [dedupedLeads, decisions]);
+  }, [visibleLeads, decisions]);
 
 
 
@@ -3376,13 +3282,13 @@ const Automation = () => {
       setReplyAttachments([]);
       setShowReplyComposer(false);
 
-      // Оновимо статус ліда
-      await handleDecisionWithReason('confirmed', null);
+      // Оновлюємо дані, але не змінюємо поточний статус ліда автоматично.
+      await refresh();
 
     } catch (error) {
       setReplyError(error?.message || 'Не вдалося надіслати лист');
     }
-  }, [selectedLead, replyDraft, replyAttachments, pushNotification, handleDecisionWithReason]);
+  }, [selectedLead, replyDraft, replyAttachments, pushNotification, refresh]);
 
   return (
 
@@ -3426,7 +3332,9 @@ const Automation = () => {
 
         <SummaryCard>
 
-          <span>Активні за {getRangeLabel(rangeFilter)}</span>
+          <span>
+            {rangeFilter === null ? 'Активні за весь час' : `Активні за ${getRangeLabel(rangeFilter)}`}
+          </span>
 
           <strong>{summary.active ?? 0}</strong>
 
@@ -3513,7 +3421,7 @@ const Automation = () => {
 
             <RangeButton type="button" onClick={toggleRangeMenu}>
 
-              Період: {getRangeLabel(rangeFilter)}
+              Період: {rangeFilter === null ? 'за весь час' : getRangeLabel(rangeFilter)}
 
               <span className="toggle" aria-hidden="true">{rangeMenuOpen ? '▴' : '▾'}</span>
 
@@ -3527,7 +3435,7 @@ const Automation = () => {
 
                   <RangeOption
 
-                    key={days}
+                    key={days === null ? 'all' : days}
 
                     type="button"
 
@@ -3537,11 +3445,17 @@ const Automation = () => {
 
                   >
 
-                    {`Останні ${getRangeLabel(days)}`}
+                    {days === null ? 'За весь час' : `Останні ${getRangeLabel(days)}`}
 
                     <span>
 
-                      {days === 7 ? 'Фокус на тиждень' : days === 14 ? 'Двотижневий перегляд' : 'Місячна активність'}
+                      {days === null
+                        ? 'Усі ліди без обмеження по даті'
+                        : days === 7
+                          ? 'Фокус на тиждень'
+                          : days === 14
+                            ? 'Двотижневий перегляд'
+                            : 'Місячна активність'}
 
                     </span>
 
@@ -3559,7 +3473,7 @@ const Automation = () => {
 
         <span style={{ color: theme.colors.subtleText, fontSize: '0.95rem' }}>
 
-          Показано {filteredLeads.length} / {dedupedLeads.length}
+          Показано {filteredLeads.length} / {visibleLeads.length}
 
         </span>
 
@@ -3673,7 +3587,7 @@ const Automation = () => {
                         👤 Менеджер: {lead.assigned_username}
                       </LeadMeta>
                     )}
-                    {lead._messagesFromEmail > 1 && <LeadMeta>Останній лист • ще {lead._messagesFromEmail - 1} з цього email</LeadMeta>}
+                    {/* показуємо всі листи, без групування по email */}
                     {lead.person_summary && <LeadMeta>{lead.person_summary}</LeadMeta>}
                   </td>
 

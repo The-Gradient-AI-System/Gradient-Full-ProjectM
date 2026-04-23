@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { FiUser } from 'react-icons/fi';
+import { getManagers } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 
 const SidebarContainer = styled.aside`
   width: 140px;
@@ -33,6 +35,14 @@ const ManagerList = styled.ul`
   margin: 0;
 `;
 
+const EmptyState = styled.p`
+  margin: 0.5rem 0;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  font-size: 0.9rem;
+  text-align: center;
+  line-height: 1.4;
+`;
+
 const ManagerItem = styled.li`
   display: flex;
   flex-direction: column;
@@ -62,6 +72,13 @@ const Avatar = styled.div`
   box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.border};
 `;
 
+const AvatarImage = styled.img`
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+`;
+
 const StatusIndicator = styled.span`
   position: absolute;
   right: -2px;
@@ -88,30 +105,85 @@ const ManagerInfo = styled.div`
   }
 `;
 
-const managers = [
-  { name: 'Ярослав Коваль', status: 'online' },
-  { name: 'Олексій Крупа', status: 'online' },
-  { name: 'Анна Вовк', status: 'offline' },
-  { name: 'Вікторія Шишка', status: 'away' },
-];
-
 const Sidebar = () => {
+  const { user } = useAuth();
+  const [managers, setManagers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [errorText, setErrorText] = useState('');
+
+  const isAdmin = user?.role === 'admin';
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    const loadManagers = async () => {
+      setLoading(true);
+      setErrorText('');
+      try {
+        const data = await getManagers();
+        if (!cancelled) {
+          setManagers(data?.managers || []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setManagers([]);
+          setErrorText(error?.message || 'Не вдалося завантажити менеджерів.');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+    loadManagers();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
+
+  const preparedManagers = useMemo(
+    () =>
+      managers.map((manager) => ({
+        id: manager.id,
+        name: manager.username || manager.email || 'Менеджер',
+        avatar: manager.avatar_url || '',
+        status: manager.is_active ? 'online' : 'away',
+      })),
+    [managers]
+  );
+
+  if (!isAdmin) {
+    return null;
+  }
+
   return (
     <SidebarContainer>
       <Title>Менеджери</Title>
-      <ManagerList>
-        {managers.map((manager, index) => (
-          <ManagerItem key={index}>
-            <Avatar>
-              <FiUser size={26} color="#1b1c2f" />
-              <StatusIndicator status={manager.status} />
-            </Avatar>
-            <ManagerInfo>
-              <p>{manager.name}</p>
-            </ManagerInfo>
-          </ManagerItem>
-        ))}
-      </ManagerList>
+      {loading ? (
+        <EmptyState>Завантаження менеджерів...</EmptyState>
+      ) : errorText ? (
+        <EmptyState>{errorText}</EmptyState>
+      ) : preparedManagers.length === 0 ? (
+        <EmptyState>У базі даних поки немає менеджерів.</EmptyState>
+      ) : (
+        <ManagerList>
+          {preparedManagers.map((manager) => (
+            <ManagerItem key={manager.id}>
+              <Avatar>
+                {manager.avatar ? (
+                  <AvatarImage src={manager.avatar} alt={manager.name} />
+                ) : (
+                  <FiUser size={26} color="#1b1c2f" />
+                )}
+                <StatusIndicator status={manager.status} />
+              </Avatar>
+              <ManagerInfo>
+                <p>{manager.name}</p>
+              </ManagerInfo>
+            </ManagerItem>
+          ))}
+        </ManagerList>
+      )}
     </SidebarContainer>
   );
 };

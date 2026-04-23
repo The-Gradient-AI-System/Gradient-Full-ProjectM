@@ -264,6 +264,14 @@ export const deleteManager = (managerId, confirmUsername) =>
     }
   );
 
+export const getMyProfile = () => request('/profile/me');
+
+export const updateMyProfile = (payload) =>
+  request('/profile/me', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+
 export const sendEmailWithAttachments = (payload) => {
   const formData = new FormData();
 

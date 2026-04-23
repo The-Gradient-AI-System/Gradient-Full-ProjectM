@@ -37,6 +37,7 @@ def init_db():
     """)
 
     _ensure_column("users", "is_active", "BOOLEAN DEFAULT TRUE")
+    _ensure_column("users", "avatar_url", "TEXT")
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS processed_emails (
@@ -86,6 +87,9 @@ def init_db():
     _ensure_column("gmail_messages", "preprocessing_status", "TEXT DEFAULT 'idle'")
     _ensure_column("gmail_messages", "preprocessed_replies", "TEXT")
     _ensure_column("gmail_messages", "preprocessed_at", "TIMESTAMP")
+    _ensure_column("gmail_messages", "last_reply_subject", "TEXT")
+    _ensure_column("gmail_messages", "last_reply_body", "TEXT")
+    _ensure_column("gmail_messages", "last_replied_at", "TIMESTAMP")
     _ensure_column("lead_status_history", "rejection_reason", "TEXT")
 
     conn.execute("""

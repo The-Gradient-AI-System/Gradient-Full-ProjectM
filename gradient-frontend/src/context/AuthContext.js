@@ -11,6 +11,7 @@ import {
   setAuthToken,
 
   getGmailLeads,
+  getMyProfile,
 
 } from '../api/client';
 
@@ -204,6 +205,22 @@ const formatEmailCountMessage = (count) => {
 
 };
 
+const decodeJwtPayload = (tokenValue) => {
+  if (!tokenValue || typeof tokenValue !== 'string') return null;
+  const parts = tokenValue.split('.');
+  if (parts.length < 2) return null;
+
+  try {
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    const json = atob(padded);
+    return JSON.parse(json);
+  } catch (error) {
+    console.warn('Failed to decode JWT payload', error);
+    return null;
+  }
+};
 
 
 export const AuthProvider = ({ children }) => {
@@ -310,9 +327,42 @@ export const AuthProvider = ({ children }) => {
 
       setToken(storedToken);
 
+      // Hydrate user from JWT so role-based menus survive refresh/reload.
+      setUser((prev) => {
+        if (prev) return prev;
+        const payload = decodeJwtPayload(storedToken);
+        const role = payload?.role || 'manager';
+        const username = payload?.sub || null;
+        return { username: username || 'User', email: username || 'User', role, avatar_url: '' };
+      });
+
     }
 
   }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const hydrateProfile = async () => {
+      try {
+        const profile = await getMyProfile();
+        if (cancelled || !profile) return;
+        setUser((prev) => ({
+          ...(prev || {}),
+          username: profile.username || prev?.username || 'User',
+          email: profile.email || prev?.email || '',
+          role: profile.role || prev?.role || 'manager',
+          avatar_url: profile.avatar_url || '',
+        }));
+      } catch (error) {
+        console.warn('Не вдалося завантажити профіль користувача', error);
+      }
+    };
+    hydrateProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
 
 
@@ -386,7 +436,21 @@ export const AuthProvider = ({ children }) => {
 
       setToken(receivedToken);
 
-      setUser({ email, role: userRole });
+      setUser({ email, username: email, role: userRole, avatar_url: '' });
+
+      try {
+        const profile = await getMyProfile();
+        if (profile) {
+          setUser({
+            username: profile.username || email,
+            email: profile.email || email,
+            role: profile.role || userRole,
+            avatar_url: profile.avatar_url || '',
+          });
+        }
+      } catch (profileError) {
+        console.warn('Не вдалося отримати профіль після входу', profileError);
+      }
 
 
 
@@ -395,8 +459,6 @@ export const AuthProvider = ({ children }) => {
         const leadsPayload = await getGmailLeads();
 
         const leads = leadsPayload?.leads ?? [];
-
-        const waitingLeads = leads.filter((lead) => ((lead.status || 'waiting').toLowerCase()) === 'waiting');
 
         const sortedLeads = [...leads]
 
@@ -498,7 +560,7 @@ export const AuthProvider = ({ children }) => {
 
     }
 
-  }, []);
+  }, [pushNotification]);
 
 
 
@@ -581,6 +643,7 @@ export const AuthProvider = ({ children }) => {
       leadSnapshot,
 
       updateLeadSnapshot,
+      setUser,
 
     }),
 
@@ -607,6 +670,7 @@ export const AuthProvider = ({ children }) => {
       leadSnapshot,
 
       updateLeadSnapshot,
+      setUser,
 
     ]
 

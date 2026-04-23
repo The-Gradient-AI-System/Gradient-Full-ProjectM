@@ -288,6 +288,37 @@ def _is_qualified(lead: dict[str, str]) -> bool:
     return bool(lead.get("phone") or lead.get("website") or lead.get("company"))
 
 
+def _count_visible_gmail_messages(user_info: dict | None) -> int:
+    """Rows in gmail_messages visible to this user (no date filter, not subject to LIMIT)."""
+    if not user_info:
+        return 0
+    role = user_info.get("role")
+    if role == "admin":
+        with db_lock:
+            row = conn.execute("SELECT COUNT(*) FROM gmail_messages").fetchone()
+        return int(row[0] if row else 0)
+    if role != "manager":
+        return 0
+    user_id = user_info.get("id")
+    with db_lock:
+        my_in_work = conn.execute(
+            "SELECT gmail_id FROM gmail_messages WHERE assigned_to = ? AND UPPER(status) = 'IN_WORK'",
+            [user_id],
+        ).fetchone()
+        if my_in_work:
+            return 1
+        row = conn.execute(
+            """
+            SELECT COUNT(*) FROM gmail_messages gm
+            WHERE gm.status IS NULL
+               OR UPPER(gm.status) != 'IN_WORK'
+               OR gm.assigned_to = ?
+            """,
+            [user_id],
+        ).fetchone()
+    return int(row[0] if row else 0)
+
+
 def build_leads_payload(limit: int | None = 120) -> dict[str, Any]:
     # Try to use database first for better performance and stability
     try:
@@ -305,6 +336,7 @@ def build_leads_payload_from_db(
     range_days: int | None = None,
 ) -> dict[str, Any]:
     """Build leads payload from database with role-based filtering"""
+    total_emails_all_time = _count_visible_gmail_messages(user_info)
 
     # Build query based on user role
     if user_info and user_info.get("role") == "admin":
@@ -315,6 +347,7 @@ def build_leads_payload_from_db(
                 received_at, company, body, phone, website, company_name, company_info,
                 person_role, person_links, person_location, person_experience, person_summary,
                 person_insights, company_insights, assigned_to, assigned_at, synced_at, created_at,
+                gm.last_reply_subject, gm.last_reply_body, gm.last_replied_at,
                 u.username as assigned_username, u.role as assigned_role
             FROM gmail_messages gm
             LEFT JOIN users u ON gm.assigned_to = u.id
@@ -352,9 +385,12 @@ def build_leads_payload_from_db(
                 "assigned_at": lead[22],
                 "synced_at": lead[23],
                 "created_at": lead[24],
-                "assigned_username": lead[25],
-                "assigned_role": lead[26],
-                "assigned_display": f"[{lead[26].upper()}] {lead[25]}" if lead[25] else None
+                "last_reply_subject": lead[25] or "",
+                "last_reply_body": lead[26] or "",
+                "last_replied_at": lead[27],
+                "assigned_username": lead[28],
+                "assigned_role": lead[29],
+                "assigned_display": f"[{lead[29].upper()}] {lead[28]}" if lead[28] else None
             }
 
             # Process JSON fields
@@ -395,6 +431,7 @@ def build_leads_payload_from_db(
                         received_at, company, body, phone, website, company_name, company_info,
                         person_role, person_links, person_location, person_experience, person_summary,
                         person_insights, company_insights, assigned_to, assigned_at, synced_at, created_at,
+                        gm.last_reply_subject, gm.last_reply_body, gm.last_replied_at,
                         u.username as assigned_username, u.role as assigned_role
                     FROM gmail_messages gm
                     LEFT JOIN users u ON gm.assigned_to = u.id
@@ -408,6 +445,7 @@ def build_leads_payload_from_db(
                         received_at, company, body, phone, website, company_name, company_info,
                         person_role, person_links, person_location, person_experience, person_summary,
                         person_insights, company_insights, assigned_to, assigned_at, synced_at, created_at,
+                        gm.last_reply_subject, gm.last_reply_body, gm.last_replied_at,
                         u.username as assigned_username, u.role as assigned_role
                     FROM gmail_messages gm
                     LEFT JOIN users u ON gm.assigned_to = u.id
@@ -447,9 +485,12 @@ def build_leads_payload_from_db(
                 "assigned_at": lead[22],
                 "synced_at": lead[23],
                 "created_at": lead[24],
-                "assigned_username": lead[25],
-                "assigned_role": lead[26],
-                "assigned_display": f"[{lead[26].upper()}] {lead[25]}" if lead[25] else None
+                "last_reply_subject": lead[25] or "",
+                "last_reply_body": lead[26] or "",
+                "last_replied_at": lead[27],
+                "assigned_username": lead[28],
+                "assigned_role": lead[29],
+                "assigned_display": f"[{lead[29].upper()}] {lead[28]}" if lead[28] else None
             }
 
             # Process JSON fields
@@ -582,6 +623,7 @@ def build_leads_payload_from_db(
         "percentage": percentage,
         "qualified": qualified_total,
         "waiting": waiting_total,
+        "total_emails_all_time": total_emails_all_time,
     }
 
     pending_groups: list[dict[str, Any]] = []
