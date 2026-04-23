@@ -1,9 +1,18 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 from service.settingsService import get_reply_settings, update_reply_settings
+from service.leadService import get_current_user_role
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
+security = HTTPBearer()
+
+
+def get_user_from_token(credentials: HTTPAuthorizationCredentials = Security(security)):
+    """Extract user info from Authorization header"""
+    token = credentials.credentials
+    return get_current_user_role(token)
 
 
 class ReplyPromptsPayload(BaseModel):
@@ -20,13 +29,13 @@ class ReplySettingsPayload(BaseModel):
 
 
 @router.get("/reply-prompts")
-def read_reply_prompts() -> ReplySettingsPayload:
+def read_reply_prompts(user_info: dict = Depends(get_user_from_token)) -> ReplySettingsPayload:
     settings = get_reply_settings()
     return ReplySettingsPayload(**settings)
 
 
 @router.put("/reply-prompts")
-def write_reply_prompts(payload: ReplySettingsPayload) -> ReplySettingsPayload:
+def write_reply_prompts(payload: ReplySettingsPayload, user_info: dict = Depends(get_user_from_token)) -> ReplySettingsPayload:
     updated = update_reply_settings(
         top_block=payload.topBlock,
         bottom_block=payload.bottomBlock,
