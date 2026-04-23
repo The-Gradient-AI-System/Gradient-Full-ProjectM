@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Security
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import List
 import base64
 import mimetypes
@@ -10,15 +11,23 @@ from email.mime.text import MIMEText
 from email import encoders
 
 from service.gmailService import get_gmail_service
+from service.leadService import get_current_user_role
 
 router = APIRouter(prefix="/email", tags=["Email"])
+security = HTTPBearer()
+
+def get_user_from_token(credentials: HTTPAuthorizationCredentials = Security(security)):
+    """Extract user info from Authorization header"""
+    token = credentials.credentials
+    return get_current_user_role(token)
 
 @router.post("/send")
 async def send_email_with_attachments(
     to: str = Form(...),
     subject: str = Form(...),
     body: str = Form(...),
-    attachments: List[UploadFile] = File(default=[])
+    attachments: List[UploadFile] = File(default=[]),
+    user_info: dict = Depends(get_user_from_token)
 ):
     """
     Send email with attachments via Gmail API
