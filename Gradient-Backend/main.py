@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 from routes.userRoutes import router as user_router
 from routes.gmailRoutes import router as gmail_router
 from routes.settingsRoutes import router as settings_router
@@ -12,9 +13,23 @@ import asyncio
 
 app = FastAPI()
 
+default_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "https://gradient-prod-test.vercel.app",
+]
+
+extra_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],
+    allow_origins=[*default_origins, *extra_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
