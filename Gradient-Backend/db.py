@@ -1,13 +1,62 @@
+import os
+import re
 import duckdb
-from pathlib import Path
 import threading
+from pathlib import Path
+
+import psycopg
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "db" / "database.duckdb"
+DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "db" / "database.duckdb")))
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-conn = duckdb.connect(DB_PATH)
+class _CompatResult:
+    def __init__(self, rows=None):
+        self._rows = rows
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
+    def fetchall(self):
+        if not self._rows:
+            return []
+        return self._rows
+
+
+class _PostgresCompatConnection:
+    def __init__(self, dsn: str):
+        self._conn = psycopg.connect(dsn)
+
+    @staticmethod
+    def _adapt_query(query: str) -> str:
+        # The codebase uses DuckDB placeholders (?), convert to psycopg style (%s).
+        return re.sub(r"\?", "%s", query)
+
+    def execute(self, query: str, params=None):
+        normalized = self._adapt_query(query)
+        with self._conn.cursor() as cur:
+            cur.execute(normalized, params or [])
+            rows = cur.fetchall() if cur.description else []
+        return _CompatResult(rows)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+
+if DATABASE_URL:
+    conn = _PostgresCompatConnection(DATABASE_URL)
+else:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(DB_PATH)
 
 db_lock = threading.RLock()
 
