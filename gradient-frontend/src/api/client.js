@@ -1,6 +1,11 @@
-const DEFAULT_API_URL = 'http://127.0.0.1:8000';
+const LOCAL_API_URL = 'http://127.0.0.1:8000';
+const PROD_API_URL = 'https://gradient-prod-test.onrender.com';
 
+const isLocalRuntime =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
+const DEFAULT_API_URL = isLocalRuntime ? LOCAL_API_URL : PROD_API_URL;
 
 const API_URL = (typeof process !== 'undefined' && process.env.REACT_APP_API_URL) || DEFAULT_API_URL;
 
