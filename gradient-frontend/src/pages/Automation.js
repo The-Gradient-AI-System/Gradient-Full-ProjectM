@@ -64,8 +64,6 @@ const isQualifiedLead = (lead) => {
 
 const isEmptyLeadRow = (lead) => !lead || (!lead.email && !lead.full_name);
 
-const getLeadCompletenessScore = (lead) => lead?.completeness_score ?? lead?.score ?? 0;
-
 const normalizeLeadInsights = (lead) => {
   if (!lead) return null;
   return {
@@ -2005,6 +2003,13 @@ const ActionButton = styled.button`
         `;
 
       case 'snooze':
+        return `
+
+          background: #ffb347;
+
+          color: #3d1a00;
+
+        `;
 
       default:
 
@@ -2548,7 +2553,7 @@ const Automation = () => {
 
   const location = useLocation();
 
-  const { activeModals, openModal, closeModal: closeGlobalModal } = useModalManager();
+  const { closeModal: closeGlobalModal } = useModalManager();
 
   const { leadSnapshot, updateLeadSnapshot, pushNotification, user } = useAuth();
 
