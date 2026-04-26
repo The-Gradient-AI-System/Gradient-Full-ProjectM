@@ -3,7 +3,6 @@ import styled, { useTheme } from 'styled-components';
 import { getGmailLeads, postGenerateReplies, postLeadStatus, postLeadInsights, sendEmailWithAttachments } from '../api/client';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useModalManager } from '../context/ModalManagerContext';
 
 // --- Helper Functions and Hooks ---
 
@@ -2552,8 +2551,6 @@ const Automation = () => {
   const navigate = useNavigate();
 
   const location = useLocation();
-
-  const { closeModal: closeGlobalModal } = useModalManager();
 
   const { leadSnapshot, updateLeadSnapshot, pushNotification, user } = useAuth();
 
