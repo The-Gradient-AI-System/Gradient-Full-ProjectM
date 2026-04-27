@@ -336,7 +336,7 @@ const Login = () => {
           Увійти через Google
         </SecondaryButton>
 
-        <Helper>Справжня авторизація з'явиться після підключення бекенду.</Helper>
+        <Helper></Helper>
         {error && <Message $variant="error">{error}</Message>}
       </Card>
     </Background>
