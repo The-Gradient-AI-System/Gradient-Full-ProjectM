@@ -9,6 +9,7 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from dotenv import load_dotenv
 from db import conn, db_lock
+from service.token_store import ensure_token_file
 
 load_dotenv()
 
@@ -25,10 +26,11 @@ SCOPES = [
 
 
 def _get_sheet_service():
-    if not TOKEN_FILE.exists():
+    if not ensure_token_file(TOKEN_FILE):
         raise FileNotFoundError(
             f"token.json not found at {TOKEN_FILE}. "
-            "Run auth_init.py first."
+            "Provide GMAIL_TOKEN_JSON (or GMAIL_TOKEN_JSON_B64) in environment "
+            "or run auth_init.py first."
         )
 
     creds = Credentials.from_authorized_user_file(

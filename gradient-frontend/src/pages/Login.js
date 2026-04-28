@@ -63,17 +63,20 @@ const Background = styled.section`
 const Card = styled.div`
   position: relative;
   width: min(100%, 420px);
-  padding: clamp(2.4rem, 5vw, 3rem);
+  min-height: clamp(560px, 72vh, 640px);
+  padding: clamp(2.9rem, 6vw, 3.6rem) clamp(2rem, 5vw, 3rem);
   border-radius: 28px;
   background: ${({ theme }) => theme.colors.surface};
   border: 1px solid ${({ theme }) => theme.colors.border};
   box-shadow: 0 26px 65px rgba(15, 23, 42, 0.18);
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  justify-content: center;
+  gap: 2.4rem;
   z-index: 1;
 
   @media (max-width: 520px) {
+    min-height: auto;
     padding: 2.5rem 1.75rem;
     border-radius: 22px;
   }
@@ -102,13 +105,13 @@ const TitleBlock = styled.header`
 const Form = styled.form`
   display: flex;
   flex-direction: column;
-  gap: 1.45rem;
+  gap: 2rem;
 `;
 
 const Field = styled.label`
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.8rem;
   font-size: 0.9rem;
   color: ${({ theme }) => theme.colors.textSecondary};
 `;
@@ -177,6 +180,7 @@ const PrimaryButton = styled.button`
   font-size: 1.05rem;
   font-weight: 600;
   letter-spacing: 0.4px;
+  margin-top: 0.65rem;
   cursor: pointer;
   box-shadow: 0 12px 26px rgba(75, 163, 255, 0.22);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -224,13 +228,6 @@ const Divider = styled.div`
     height: 1px;
     background: ${({ theme }) => theme.colors.border};
   }
-`;
-
-const Helper = styled.p`
-  margin: 0;
-  text-align: center;
-  font-size: 0.85rem;
-  color: ${({ theme }) => theme.colors.textSecondary};
 `;
 
 const Message = styled.div`
@@ -336,7 +333,6 @@ const Login = () => {
           Увійти через Google
         </SecondaryButton>
 
-        <Helper>Справжня авторизація з'явиться після підключення бекенду.</Helper>
         {error && <Message $variant="error">{error}</Message>}
       </Card>
     </Background>

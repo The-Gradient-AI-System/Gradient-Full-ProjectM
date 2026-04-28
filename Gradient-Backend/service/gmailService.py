@@ -7,6 +7,7 @@ import json
 from db import conn, db_lock
 from service.aiService import analyze_email
 from service.leadIntentService import detect_sales_intent
+from service.token_store import ensure_token_file
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CREDENTIALS_DIR = BASE_DIR / "credentials"
@@ -44,10 +45,11 @@ _MESSAGE_VALUE_COLUMNS = [
 
 
 def get_gmail_service():
-    if not TOKEN_FILE.exists():
+    if not ensure_token_file(TOKEN_FILE):
         raise FileNotFoundError(
             f"token.json not found at {TOKEN_FILE}. "
-            "Authorize Gmail first."
+            "Provide GMAIL_TOKEN_JSON (or GMAIL_TOKEN_JSON_B64) in environment "
+            "or authorize Gmail first."
         )
 
     creds = Credentials.from_authorized_user_file(
