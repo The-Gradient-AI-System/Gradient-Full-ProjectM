@@ -11,6 +11,7 @@ import ManagerManagement from './pages/ManagerManagement';
 import LeadProfile from './pages/LeadProfile';
 import LeadsHistory from './pages/LeadsHistory';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import './App.css';
 import { lightTheme, darkTheme } from './styles/theme';
 import { ThemeProviderWrapper, ThemeContext } from './context/ThemeContext';
@@ -223,6 +224,7 @@ function InnerApp() {
       <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/" element={<AnalyticsManager />} />
             <Route path="/work-zone" element={<Automation />} />

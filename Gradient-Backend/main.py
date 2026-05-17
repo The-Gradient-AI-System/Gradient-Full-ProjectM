@@ -5,6 +5,7 @@ from routes.gmailRoutes import router as gmail_router
 from routes.settingsRoutes import router as settings_router
 from routes.managerRoutes import router as manager_router
 from routes.profileRoutes import router as profile_router
+from routes.passwordResetRoutes import router as password_reset_router
 from routes import emailRoutes
 from routes.leadRoutes import router as lead_router
 from service.autosyncService import auto_sync_loop
@@ -25,6 +26,7 @@ app.include_router(gmail_router)
 app.include_router(settings_router)
 app.include_router(manager_router)
 app.include_router(profile_router)
+app.include_router(password_reset_router)
 app.include_router(lead_router)
 app.include_router(emailRoutes.router)
 

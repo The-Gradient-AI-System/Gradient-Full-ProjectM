@@ -243,6 +243,23 @@ const Message = styled.div`
   font-weight: 500;
 `;
 
+const ForgotLink = styled.button`
+  background: none;
+  border: none;
+  padding: 0;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.2s ease;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -321,6 +338,12 @@ const Login = () => {
                 {showPassword ? <FiEyeOff /> : <FiEye />}
               </ToggleVisibility>
             </InputShell>
+            <ForgotLink
+              type="button"
+              onClick={() => navigate('/reset-password', { state: { email } })}
+            >
+              Скинути пароль
+            </ForgotLink>
           </Field>
 
           <PrimaryButton type="submit" disabled={loading}>

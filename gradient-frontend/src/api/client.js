@@ -272,6 +272,42 @@ export const updateMyProfile = (payload) =>
     body: JSON.stringify(payload),
   });
 
+export const updateMyUsername = (payload) =>
+  request('/profile/me/username', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
+export const updateMyEmail = (payload) =>
+  request('/profile/me/email', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
+export const updateMyPassword = (payload) =>
+  request('/profile/me/password', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
+export const updateMyAvatar = (payload) =>
+  request('/profile/me/avatar', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
+export const forgotPassword = (payload) =>
+  request('/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const resetPassword = (payload) =>
+  request('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
 export const sendEmailWithAttachments = (payload) => {
   const formData = new FormData();
 

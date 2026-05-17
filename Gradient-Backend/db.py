@@ -1,15 +1,68 @@
+"""
+Database module.
+
+DuckDB does NOT support concurrent use of a single connection from multiple
+threads — even with a mutex the internal vector state can be corrupted when a
+background thread (auto-sync) holds a cursor while another thread issues an
+UPDATE.
+
+Solution: every caller opens its own short-lived connection via get_conn().
+
+IMPORTANT — DuckDB 1.1.0 bug:
+  UPDATE fails with "Vector::Reference used on vector of different type" on any
+  table that has a PRIMARY KEY or UNIQUE constraint.  All tables are therefore
+  created WITHOUT those constraints; uniqueness is enforced at the application
+  layer (duplicate checks before INSERT/UPDATE).
+
+Usage:
+    from db import get_conn, db_lock
+
+    with get_conn() as conn:
+        row = conn.execute("SELECT ...").fetchone()
+
+    with db_lock:
+        with get_conn() as read_conn:
+            # validation reads
+            ...
+        with get_conn() as write_conn:
+            write_conn.execute("UPDATE ...")
+            write_conn.commit()
+
+db_lock serialises multi-step check-then-write sequences across connections.
+"""
+
 import duckdb
-from pathlib import Path
 import threading
+from contextlib import contextmanager
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "db" / "database.duckdb"
 
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-conn = duckdb.connect(DB_PATH)
-
+# Global lock for serialising multi-step transactions across connections.
 db_lock = threading.RLock()
+
+
+@contextmanager
+def get_conn():
+    """Open a fresh DuckDB connection, yield it, then close it."""
+    connection = duckdb.connect(str(DB_PATH))
+    try:
+        yield connection
+    finally:
+        try:
+            connection.close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Singleton used ONLY by init_db().  Closed immediately after init.
+# ---------------------------------------------------------------------------
+conn = duckdb.connect(str(DB_PATH))
+
 
 def _ensure_column(table: str, column: str, definition: str) -> None:
     exists = conn.execute(
@@ -25,13 +78,17 @@ def _ensure_column(table: str, column: str, definition: str) -> None:
 
 
 def init_db():
+    # NOTE: No PRIMARY KEY / UNIQUE / FOREIGN KEY constraints.
+    # DuckDB 1.1.0 has a bug where UPDATE raises
+    # "Vector::Reference used on vector of different type" on tables with
+    # unique indexes.  Uniqueness is enforced at the application layer.
     conn.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
+        id INTEGER NOT NULL,
+        username TEXT NOT NULL,
         email TEXT NOT NULL,
         password TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'manager' CHECK (role IN ('admin', 'manager')),
+        role TEXT NOT NULL DEFAULT 'manager',
         is_active BOOLEAN NOT NULL DEFAULT TRUE
     )
     """)
@@ -41,14 +98,14 @@ def init_db():
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS processed_emails (
-        gmail_id TEXT PRIMARY KEY,
+        gmail_id TEXT,
         processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS gmail_messages (
-        gmail_id TEXT PRIMARY KEY,
+        gmail_id TEXT,
         status TEXT,
         first_name TEXT,
         last_name TEXT,
@@ -77,8 +134,7 @@ def init_db():
         assigned_to INTEGER,
         assigned_at TIMESTAMP,
         synced_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (assigned_to) REFERENCES users (id)
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
@@ -90,18 +146,16 @@ def init_db():
     _ensure_column("gmail_messages", "last_reply_subject", "TEXT")
     _ensure_column("gmail_messages", "last_reply_body", "TEXT")
     _ensure_column("gmail_messages", "last_replied_at", "TIMESTAMP")
-    _ensure_column("lead_status_history", "rejection_reason", "TEXT")
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS lead_status_history (
-        id TEXT PRIMARY KEY,
+        id TEXT,
         gmail_id TEXT NOT NULL,
         changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         lead_name TEXT,
         status TEXT NOT NULL,
         assignee TEXT,
-        rejection_reason TEXT,
-        FOREIGN KEY (gmail_id) REFERENCES gmail_messages (gmail_id)
+        rejection_reason TEXT
     )
     """)
 
@@ -109,7 +163,7 @@ def init_db():
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS app_settings (
-        key TEXT PRIMARY KEY,
+        key TEXT,
         value TEXT NOT NULL
     )
     """)
@@ -141,4 +195,9 @@ def init_db():
         ],
     )
 
+    conn.commit()
+
+
 init_db()
+# Close the init connection so it doesn't compete with per-request connections.
+conn.close()

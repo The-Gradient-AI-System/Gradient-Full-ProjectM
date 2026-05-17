@@ -1,9 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
-import { FiCamera, FiEye, FiEyeOff } from 'react-icons/fi';
+import { FiCamera, FiEye, FiEyeOff, FiCheck, FiX } from 'react-icons/fi';
 import userAvatar from '../assets/user.jpg';
-import { getMyProfile, setAuthToken, updateMyProfile } from '../api/client';
+import {
+  getMyProfile,
+  setAuthToken,
+  updateMyUsername,
+  updateMyEmail,
+  updateMyPassword,
+  updateMyAvatar,
+} from '../api/client';
 import { useAuth } from '../context/AuthContext';
+
+// ---------------------------------------------------------------------------
+// Styled components
+// ---------------------------------------------------------------------------
 
 const PageWrapper = styled.section`
   width: 100%;
@@ -18,7 +29,7 @@ const PageWrapper = styled.section`
 
 const ProfileCard = styled.div`
   width: 100%;
-  max-width: 520px;
+  max-width: 540px;
   background: ${({ theme }) => theme.colors.cardBackground};
   border: 1px solid ${({ theme }) => theme.colors.border};
   box-shadow: 0 18px 40px ${({ theme }) => theme.colors.shadow};
@@ -27,7 +38,6 @@ const ProfileCard = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
-  text-align: center;
 
   @media (max-width: 540px) {
     padding: 2.25rem 1.75rem;
@@ -50,7 +60,7 @@ const AvatarWrapper = styled.div`
   height: 148px;
   border-radius: 50%;
   overflow: hidden;
-  margin-bottom: 1.75rem;
+  margin-bottom: 2rem;
   box-shadow: 0 0 0 4px ${({ theme }) => theme.colors.surface}, 0 18px 32px rgba(0, 0, 0, 0.18);
 `;
 
@@ -82,37 +92,47 @@ const AvatarOverlay = styled.button`
   }
 `;
 
-const Form = styled.form`
+const Divider = styled.hr`
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+  border: none;
+  border-top: 1px solid ${({ theme }) => theme.colors.border};
+  margin: 0.5rem 0 1.75rem;
 `;
 
-const Field = styled.label`
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.75rem;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 0.95rem;
+const Section = styled.div`
+  width: 100%;
+  margin-bottom: 1.75rem;
+`;
+
+const SectionTitle = styled.h3`
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.text};
   letter-spacing: 0.2px;
+`;
+
+const FieldRow = styled.div`
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
 `;
 
 const InputShell = styled.div`
   position: relative;
-  width: 100%;
+  flex: 1;
 `;
 
 const Input = styled.input`
   width: 100%;
-  padding: 0.95rem 1.15rem;
+  padding: 0.9rem 1.1rem;
   border-radius: 14px;
   border: 1px solid ${({ theme }) => theme.colors.border};
   background: ${({ theme }) => theme.colors.surface};
   color: ${({ theme }) => theme.colors.text};
-  font-size: 1.05rem;
+  font-size: 1rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
 
   &:focus {
     outline: none;
@@ -136,138 +156,191 @@ const EyeButton = styled.button`
   cursor: pointer;
 `;
 
-const SubmitButton = styled.button`
-  margin-top: 1rem;
-  align-self: center;
-  padding: 0.85rem 2.6rem;
-  border-radius: 999px;
+const SaveButton = styled.button`
+  padding: 0.9rem 1.5rem;
+  border-radius: 14px;
   border: none;
   background: linear-gradient(135deg, ${({ theme }) => theme.colors.primary} 0%, #7b6bff 100%);
   color: #fff;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  letter-spacing: 0.3px;
   cursor: pointer;
-  box-shadow: 0 16px 30px rgba(75, 163, 255, 0.35);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px rgba(75, 163, 255, 0.28);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
 
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 18px 36px rgba(75, 163, 255, 0.45);
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 26px rgba(75, 163, 255, 0.38);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
   }
 `;
 
-const HelperText = styled.p`
-  margin-top: 0.75rem;
-  font-size: 0.9rem;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  text-align: center;
-`;
-
-const SuccessBadge = styled.span`
+const FeedbackBadge = styled.span`
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  margin-top: 1rem;
-  padding: 0.55rem 1.1rem;
+  margin-top: 0.6rem;
+  padding: 0.4rem 0.85rem;
   border-radius: 999px;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
-  color: #16db65;
-  background: rgba(22, 219, 101, 0.12);
+  color: ${({ $error }) => ($error ? '#ff4d4f' : '#16db65')};
+  background: ${({ $error }) =>
+    $error ? 'rgba(255, 77, 79, 0.14)' : 'rgba(22, 219, 101, 0.12)'};
 `;
 
-const ErrorBadge = styled(SuccessBadge)`
-  color: #ff4d4f;
-  background: rgba(255, 77, 79, 0.14);
+const PasswordGrid = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
 `;
+
+// ---------------------------------------------------------------------------
+// Small reusable field section
+// ---------------------------------------------------------------------------
+
+const FieldSection = ({ title, children }) => (
+  <Section>
+    <SectionTitle>{title}</SectionTitle>
+    {children}
+  </Section>
+);
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 
 const Profile = () => {
   const fileInputRef = useRef(null);
   const { user, setUser } = useAuth();
-  const [avatar, setAvatar] = useState(userAvatar);
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState(null);
-  const [error, setError] = useState('');
 
+  // --- avatar ---
+  const [avatar, setAvatar] = useState(userAvatar);
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [avatarFeedback, setAvatarFeedback] = useState(null); // {msg, error}
+
+  // --- username ---
+  const [username, setUsername] = useState('');
+  const [usernameLoading, setUsernameLoading] = useState(false);
+  const [usernameFeedback, setUsernameFeedback] = useState(null);
+
+  // --- email ---
+  const [email, setEmail] = useState('');
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailFeedback, setEmailFeedback] = useState(null);
+
+  // --- password ---
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [showOld, setShowOld] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordFeedback, setPasswordFeedback] = useState(null);
+
+  // Load profile on mount
   useEffect(() => {
     let cancelled = false;
-    const loadProfile = async () => {
+    const load = async () => {
       try {
         const profile = await getMyProfile();
         if (cancelled || !profile) return;
         setUsername(profile.username || '');
         setEmail(profile.email || '');
         setAvatar(profile.avatar_url || userAvatar);
-      } catch (err) {
-        if (!cancelled) setError('Не вдалося завантажити профіль.');
+      } catch {
+        // silently ignore — user can still edit
       }
     };
-    loadProfile();
-    return () => {
-      cancelled = true;
-    };
+    load();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-    if (user?.avatar_url) {
-      setAvatar(user.avatar_url);
-    }
+    if (user?.avatar_url) setAvatar(user.avatar_url);
   }, [user?.avatar_url]);
 
-  const triggerFilePicker = () => {
-    fileInputRef.current?.click();
-  };
+  // --- Avatar handlers ---
+  const triggerFilePicker = () => fileInputRef.current?.click();
 
   const handleAvatarChange = event => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setAvatar(reader.result);
+    reader.onload = async () => {
+      if (typeof reader.result !== 'string') return;
+      const dataUrl = reader.result;
+      setAvatar(dataUrl);
+      setAvatarLoading(true);
+      setAvatarFeedback(null);
+      try {
+        await updateMyAvatar({ avatar_url: dataUrl });
+        setUser(prev => ({ ...(prev || {}), avatar_url: dataUrl }));
+        setAvatarFeedback({ msg: 'Фото оновлено', error: false });
+      } catch (err) {
+        setAvatarFeedback({ msg: err?.message || 'Помилка оновлення фото', error: true });
+      } finally {
+        setAvatarLoading(false);
       }
     };
     reader.readAsDataURL(file);
-    setLastSavedAt(null);
-    setError('');
   };
 
-  const handleSubmit = async event => {
-    event.preventDefault();
-    setLoading(true);
-    setError('');
+  // --- Username handler ---
+  const handleSaveUsername = async e => {
+    e.preventDefault();
+    if (!username.trim()) return;
+    setUsernameLoading(true);
+    setUsernameFeedback(null);
     try {
-      const payload = {
-        username: username.trim(),
-        email: email.trim(),
-        avatar_url: avatar || '',
-      };
-      if (password.trim()) {
-        payload.password = password.trim();
-      }
-      const updated = await updateMyProfile(payload);
-      if (updated?.access_token) {
-        setAuthToken(updated.access_token);
-      }
-      setUser((prev) => ({
-        ...(prev || {}),
-        username: updated?.username || payload.username,
-        email: updated?.email || payload.email,
-        role: updated?.role || prev?.role || 'manager',
-        avatar_url: updated?.avatar_url || payload.avatar_url,
-      }));
-      setPassword('');
-      setLastSavedAt(new Date());
+      const result = await updateMyUsername({ username: username.trim() });
+      if (result?.access_token) setAuthToken(result.access_token);
+      setUser(prev => ({ ...(prev || {}), username: result?.username || username.trim() }));
+      setUsernameFeedback({ msg: "Ім'я оновлено", error: false });
     } catch (err) {
-      setError(err?.message || 'Не вдалося оновити профіль.');
+      setUsernameFeedback({ msg: err?.message || 'Помилка оновлення', error: true });
     } finally {
-      setLoading(false);
+      setUsernameLoading(false);
+    }
+  };
+
+  // --- Email handler ---
+  const handleSaveEmail = async e => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setEmailLoading(true);
+    setEmailFeedback(null);
+    try {
+      await updateMyEmail({ email: email.trim() });
+      setUser(prev => ({ ...(prev || {}), email: email.trim() }));
+      setEmailFeedback({ msg: 'Email оновлено', error: false });
+    } catch (err) {
+      setEmailFeedback({ msg: err?.message || 'Помилка оновлення', error: true });
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
+  // --- Password handler ---
+  const handleSavePassword = async e => {
+    e.preventDefault();
+    if (!oldPassword.trim() || !newPassword.trim()) return;
+    setPasswordLoading(true);
+    setPasswordFeedback(null);
+    try {
+      await updateMyPassword({ old_password: oldPassword.trim(), new_password: newPassword.trim() });
+      setOldPassword('');
+      setNewPassword('');
+      setPasswordFeedback({ msg: 'Пароль змінено', error: false });
+    } catch (err) {
+      setPasswordFeedback({ msg: err?.message || 'Помилка зміни пароля', error: true });
+    } finally {
+      setPasswordLoading(false);
     }
   };
 
@@ -275,9 +348,16 @@ const Profile = () => {
     <PageWrapper>
       <ProfileCard>
         <Title>Профіль</Title>
+
+        {/* Avatar */}
         <AvatarWrapper>
           <AvatarImage src={avatar} alt="Аватар користувача" />
-          <AvatarOverlay type="button" onClick={triggerFilePicker} title="Оновити фото">
+          <AvatarOverlay
+            type="button"
+            onClick={triggerFilePicker}
+            title="Оновити фото"
+            disabled={avatarLoading}
+          >
             <FiCamera size={18} />
           </AvatarOverlay>
           <input
@@ -288,80 +368,126 @@ const Profile = () => {
             style={{ display: 'none' }}
           />
         </AvatarWrapper>
-
-        <Form onSubmit={handleSubmit}>
-          <Field>
-            Імʼя:
-            <InputShell>
-              <Input
-                type="text"
-                value={username}
-                onChange={event => {
-                  setUsername(event.target.value);
-                  setLastSavedAt(null);
-                }}
-                placeholder="Введіть ім'я"
-                required
-                autoComplete="name"
-              />
-            </InputShell>
-          </Field>
-
-          <Field>
-            Email:
-            <InputShell>
-              <Input
-                type="email"
-                value={email}
-                onChange={event => {
-                  setEmail(event.target.value);
-                  setLastSavedAt(null);
-                  setError('');
-                }}
-                placeholder="email@example.com"
-                required
-                autoComplete="email"
-              />
-            </InputShell>
-          </Field>
-
-          <Field>
-            Password:
-            <InputShell>
-              <Input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={event => {
-                  setPassword(event.target.value);
-                  setLastSavedAt(null);
-                  setError('');
-                }}
-                minLength={6}
-                placeholder="Новий пароль (за потреби)"
-                autoComplete="new-password"
-              />
-              <EyeButton
-                type="button"
-                onClick={() => setShowPassword(visible => !visible)}
-                title={showPassword ? 'Сховати пароль' : 'Показати пароль'}
-              >
-                {showPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
-              </EyeButton>
-            </InputShell>
-          </Field>
-
-          <SubmitButton type="submit" disabled={loading || !username.trim() || !email.trim()}>
-            {loading ? 'Збереження...' : 'Змінити'}
-          </SubmitButton>
-        </Form>
-
-        <HelperText>Оновіть імʼя, email, пароль та фото профілю.</HelperText>
-        {error && <ErrorBadge>{error}</ErrorBadge>}
-        {lastSavedAt && (
-          <SuccessBadge>
-            Збережено о {lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </SuccessBadge>
+        {avatarFeedback && (
+          <FeedbackBadge $error={avatarFeedback.error}>
+            {avatarFeedback.error ? <FiX size={13} /> : <FiCheck size={13} />}
+            {avatarFeedback.msg}
+          </FeedbackBadge>
         )}
+
+        <Divider style={{ marginTop: '1.5rem' }} />
+
+        {/* Username */}
+        <FieldSection title="Імʼя">
+          <form onSubmit={handleSaveUsername}>
+            <FieldRow>
+              <InputShell>
+                <Input
+                  type="text"
+                  value={username}
+                  onChange={e => { setUsername(e.target.value); setUsernameFeedback(null); }}
+                  placeholder="Введіть ім'я"
+                  autoComplete="name"
+                  required
+                />
+              </InputShell>
+              <SaveButton type="submit" disabled={usernameLoading || !username.trim()}>
+                {usernameLoading ? '...' : 'Зберегти'}
+              </SaveButton>
+            </FieldRow>
+            {usernameFeedback && (
+              <FeedbackBadge $error={usernameFeedback.error}>
+                {usernameFeedback.error ? <FiX size={13} /> : <FiCheck size={13} />}
+                {usernameFeedback.msg}
+              </FeedbackBadge>
+            )}
+          </form>
+        </FieldSection>
+
+        {/* Email */}
+        <FieldSection title="Email">
+          <form onSubmit={handleSaveEmail}>
+            <FieldRow>
+              <InputShell>
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={e => { setEmail(e.target.value); setEmailFeedback(null); }}
+                  placeholder="email@example.com"
+                  autoComplete="email"
+                  required
+                />
+              </InputShell>
+              <SaveButton type="submit" disabled={emailLoading || !email.trim()}>
+                {emailLoading ? '...' : 'Зберегти'}
+              </SaveButton>
+            </FieldRow>
+            {emailFeedback && (
+              <FeedbackBadge $error={emailFeedback.error}>
+                {emailFeedback.error ? <FiX size={13} /> : <FiCheck size={13} />}
+                {emailFeedback.msg}
+              </FeedbackBadge>
+            )}
+          </form>
+        </FieldSection>
+
+        {/* Password */}
+        <FieldSection title="Зміна пароля">
+          <form onSubmit={handleSavePassword}>
+            <PasswordGrid>
+              <InputShell>
+                <Input
+                  type={showOld ? 'text' : 'password'}
+                  value={oldPassword}
+                  onChange={e => { setOldPassword(e.target.value); setPasswordFeedback(null); }}
+                  placeholder="Старий пароль"
+                  autoComplete="current-password"
+                  required
+                />
+                <EyeButton
+                  type="button"
+                  onClick={() => setShowOld(v => !v)}
+                  title={showOld ? 'Сховати' : 'Показати'}
+                >
+                  {showOld ? <FiEyeOff size={18} /> : <FiEye size={18} />}
+                </EyeButton>
+              </InputShell>
+
+              <InputShell>
+                <Input
+                  type={showNew ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={e => { setNewPassword(e.target.value); setPasswordFeedback(null); }}
+                  placeholder="Новий пароль (мін. 6 символів)"
+                  autoComplete="new-password"
+                  minLength={6}
+                  required
+                />
+                <EyeButton
+                  type="button"
+                  onClick={() => setShowNew(v => !v)}
+                  title={showNew ? 'Сховати' : 'Показати'}
+                >
+                  {showNew ? <FiEyeOff size={18} /> : <FiEye size={18} />}
+                </EyeButton>
+              </InputShell>
+
+              <SaveButton
+                type="submit"
+                disabled={passwordLoading || !oldPassword.trim() || !newPassword.trim()}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                {passwordLoading ? 'Збереження...' : 'Змінити пароль'}
+              </SaveButton>
+            </PasswordGrid>
+            {passwordFeedback && (
+              <FeedbackBadge $error={passwordFeedback.error}>
+                {passwordFeedback.error ? <FiX size={13} /> : <FiCheck size={13} />}
+                {passwordFeedback.msg}
+              </FeedbackBadge>
+            )}
+          </form>
+        </FieldSection>
       </ProfileCard>
     </PageWrapper>
   );

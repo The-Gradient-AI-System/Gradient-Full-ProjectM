@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
+from typing import Optional
 
-from db import conn, db_lock
-from hashPswd import hash_password
+from db import get_conn, db_lock
+from hashPswd import hash_password, verify_password
 from service.leadService import get_current_user_role
 from service.userService import create_access_token
 
@@ -16,22 +17,35 @@ def get_user_from_token(credentials: HTTPAuthorizationCredentials = Security(sec
     return get_current_user_role(token)
 
 
-class UpdateProfilePayload(BaseModel):
+class UpdateUsernamePayload(BaseModel):
     username: str = Field(min_length=1)
+
+
+class UpdateEmailPayload(BaseModel):
     email: EmailStr
-    password: str | None = Field(default=None, min_length=6)
-    avatar_url: str | None = None
+
+
+class UpdatePasswordPayload(BaseModel):
+    old_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=6)
+
+
+class UpdateAvatarPayload(BaseModel):
+    avatar_url: Optional[str] = None
+
+
+class UpdateProfilePayload(BaseModel):
+    username: Optional[str] = Field(default=None, min_length=1)
+    email: Optional[EmailStr] = None
+    password: Optional[str] = Field(default=None, min_length=6)
+    avatar_url: Optional[str] = None
 
 
 @router.get("/me")
 def get_my_profile(user_info: dict = Depends(get_user_from_token)):
-    with db_lock:
+    with get_conn() as conn:
         row = conn.execute(
-            """
-            SELECT id, username, email, role, is_active, avatar_url
-            FROM users
-            WHERE id = ?
-            """,
+            "SELECT id, username, email, role, is_active, avatar_url FROM users WHERE id = ?",
             [user_info["id"]],
         ).fetchone()
 
@@ -48,45 +62,168 @@ def get_my_profile(user_info: dict = Depends(get_user_from_token)):
     }
 
 
-@router.put("/me")
-def update_my_profile(payload: UpdateProfilePayload, user_info: dict = Depends(get_user_from_token)):
-    username = (payload.username or "").strip()
+@router.patch("/me/username")
+def update_username(payload: UpdateUsernamePayload, user_info: dict = Depends(get_user_from_token)):
+    username = payload.username.strip()
+
+    with db_lock:
+        # Step 1: read-only checks in a dedicated connection
+        with get_conn() as read_conn:
+            duplicate = read_conn.execute(
+                "SELECT id FROM users WHERE username = ? AND id <> ?",
+                [username, user_info["id"]],
+            ).fetchone()
+            if duplicate:
+                raise HTTPException(status_code=400, detail="Це ім'я вже зайняте")
+
+            current = read_conn.execute(
+                "SELECT role FROM users WHERE id = ?",
+                [user_info["id"]],
+            ).fetchone()
+            if not current:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            role = str(current[0]) if current[0] else "manager"
+
+        # Step 2: write in a fresh connection (read_conn is already closed)
+        with get_conn() as write_conn:
+            write_conn.execute(
+                "UPDATE users SET username = ? WHERE id = ?",
+                [username, user_info["id"]],
+            )
+            write_conn.commit()
+
+    refreshed_token = create_access_token({"sub": username, "role": role})
+    return {"username": username, "access_token": refreshed_token}
+
+
+@router.patch("/me/email")
+def update_email(payload: UpdateEmailPayload, user_info: dict = Depends(get_user_from_token)):
     email = str(payload.email).strip()
-    avatar_url = (payload.avatar_url or "").strip()
-    password = (payload.password or "").strip()
 
     with db_lock:
-        duplicate = conn.execute(
-            """
-            SELECT id
-            FROM users
-            WHERE (username = ? OR email = ?) AND id <> ?
-            """,
-            [username, email, user_info["id"]],
-        ).fetchone()
-    if duplicate:
-        raise HTTPException(status_code=400, detail="Username or email already exists")
+        # Step 1: read-only checks
+        with get_conn() as read_conn:
+            duplicate = read_conn.execute(
+                "SELECT id FROM users WHERE email = ? AND id <> ?",
+                [email, user_info["id"]],
+            ).fetchone()
+            if duplicate:
+                raise HTTPException(status_code=400, detail="Цей email вже використовується")
 
-    with db_lock:
-        current = conn.execute(
-            "SELECT role FROM users WHERE id = ?",
+            exists = read_conn.execute(
+                "SELECT id FROM users WHERE id = ?",
+                [user_info["id"]],
+            ).fetchone()
+            if not exists:
+                raise HTTPException(status_code=404, detail="User not found")
+
+        # Step 2: write
+        with get_conn() as write_conn:
+            write_conn.execute(
+                "UPDATE users SET email = ? WHERE id = ?",
+                [email, user_info["id"]],
+            )
+            write_conn.commit()
+
+    return {"email": email}
+
+
+@router.patch("/me/password")
+def update_password(payload: UpdatePasswordPayload, user_info: dict = Depends(get_user_from_token)):
+    # Step 1: read current hash (outside lock — verify_password is slow)
+    with get_conn() as read_conn:
+        current = read_conn.execute(
+            "SELECT password FROM users WHERE id = ?",
             [user_info["id"]],
         ).fetchone()
+
     if not current:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # DuckDB can throw internal vector reference errors on multi-column UPDATE in some states.
-    # Apply updates in small deterministic statements to keep writes stable.
-    with db_lock:
-        conn.execute("UPDATE users SET username = ? WHERE id = ?", [username, user_info["id"]])
-        conn.execute("UPDATE users SET email = ? WHERE id = ?", [email, user_info["id"]])
-        conn.execute("UPDATE users SET avatar_url = ? WHERE id = ?", [avatar_url, user_info["id"]])
-        if password:
-            hashed_pwd = hash_password(password)
-            conn.execute("UPDATE users SET password = ? WHERE id = ?", [hashed_pwd, user_info["id"]])
-        conn.commit()
+    stored_hash = current[0]
 
-    role = current[0] or "manager"
+    if not verify_password(payload.old_password, stored_hash):
+        raise HTTPException(status_code=400, detail="Старий пароль невірний")
+
+    new_hashed = hash_password(payload.new_password)
+
+    # Step 2: write
+    with db_lock:
+        with get_conn() as write_conn:
+            write_conn.execute(
+                "UPDATE users SET password = ? WHERE id = ?",
+                [new_hashed, user_info["id"]],
+            )
+            write_conn.commit()
+
+    return {"msg": "Пароль успішно змінено"}
+
+
+@router.patch("/me/avatar")
+def update_avatar(payload: UpdateAvatarPayload, user_info: dict = Depends(get_user_from_token)):
+    avatar_url = (payload.avatar_url or "").strip()
+
+    with db_lock:
+        # Step 1: check user exists
+        with get_conn() as read_conn:
+            exists = read_conn.execute(
+                "SELECT 1 FROM users WHERE id = ?",
+                [user_info["id"]],
+            ).fetchone()
+            if not exists:
+                raise HTTPException(status_code=404, detail="User not found")
+
+        # Step 2: write
+        with get_conn() as write_conn:
+            write_conn.execute(
+                "UPDATE users SET avatar_url = ? WHERE id = ?",
+                [avatar_url, user_info["id"]],
+            )
+            write_conn.commit()
+
+    return {"avatar_url": avatar_url}
+
+
+@router.put("/me")
+def update_my_profile(payload: UpdateProfilePayload, user_info: dict = Depends(get_user_from_token)):
+    """Legacy full-update endpoint kept for backwards compatibility."""
+    with db_lock:
+        # Step 1: read current values
+        with get_conn() as read_conn:
+            current = read_conn.execute(
+                "SELECT username, email, role, avatar_url FROM users WHERE id = ?",
+                [user_info["id"]],
+            ).fetchone()
+            if not current:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            username = (payload.username or current[0] or "").strip()
+            email = str(payload.email or current[1] or "").strip()
+            avatar_url = (payload.avatar_url if payload.avatar_url is not None else current[3] or "").strip()
+            role = str(current[2]) if current[2] else "manager"
+
+            duplicate = read_conn.execute(
+                "SELECT id FROM users WHERE (username = ? OR email = ?) AND id <> ?",
+                [username, email, user_info["id"]],
+            ).fetchone()
+            if duplicate:
+                raise HTTPException(status_code=400, detail="Username or email already exists")
+
+        # Step 2: write in a fresh connection
+        with get_conn() as write_conn:
+            write_conn.execute(
+                "UPDATE users SET username = ?, email = ?, avatar_url = ? WHERE id = ?",
+                [username, email, avatar_url, user_info["id"]],
+            )
+            if payload.password:
+                hashed_pwd = hash_password(payload.password.strip())
+                write_conn.execute(
+                    "UPDATE users SET password = ? WHERE id = ?",
+                    [hashed_pwd, user_info["id"]],
+                )
+            write_conn.commit()
+
     refreshed_token = create_access_token({"sub": username, "role": role})
     return {
         "id": user_info["id"],

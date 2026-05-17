@@ -12,7 +12,7 @@ from email import encoders
 
 from service.gmailService import get_gmail_service
 from service.leadService import get_current_user_role
-from db import conn, db_lock
+from db import get_conn, db_lock
 
 router = APIRouter(prefix="/email", tags=["Email"])
 security = HTTPBearer()
@@ -70,22 +70,22 @@ async def send_email_with_attachments(
         # Persist outgoing reply snippet for Leads History (best-effort).
         try:
             with db_lock:
-                row = conn.execute(
-                    "SELECT gmail_id FROM gmail_messages WHERE email = ? ORDER BY created_at DESC LIMIT 1",
-                    [to],
-                ).fetchone()
-                if row:
-                    conn.execute(
-                        """
-                        UPDATE gmail_messages
-                        SET last_reply_subject = ?, last_reply_body = ?, last_replied_at = CURRENT_TIMESTAMP
-                        WHERE gmail_id = ?
-                        """,
-                        [subject, body, row[0]],
-                    )
-                    conn.commit()
+                with get_conn() as conn:
+                    row = conn.execute(
+                        "SELECT gmail_id FROM gmail_messages WHERE email = ? ORDER BY created_at DESC LIMIT 1",
+                        [to],
+                    ).fetchone()
+                    if row:
+                        conn.execute(
+                            """
+                            UPDATE gmail_messages
+                            SET last_reply_subject = ?, last_reply_body = ?, last_replied_at = CURRENT_TIMESTAMP
+                            WHERE gmail_id = ?
+                            """,
+                            [subject, body, row[0]],
+                        )
+                        conn.commit()
         except Exception:
-            # Don't fail the request if logging fails.
             pass
 
         return JSONResponse(

@@ -3,7 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from typing import Optional
 from service.leadService import get_current_user_role, assign_lead_to_user, get_user_leads, get_available_leads, get_all_leads_for_admin, get_assigned_leads_only, delete_lead_by_gmail_id
-from db import conn
+from db import get_conn
 
 router = APIRouter(prefix="/leads", tags=["Lead Management"])
 security = HTTPBearer()
@@ -122,61 +122,34 @@ def delete_lead(
 
 @router.get("/{email}")
 def get_lead_profile(email: str):
-    """
-    Return aggregated lead profile by sender email.
-    Used by frontend route: `/lead/:email`.
-    """
+    """Return aggregated lead profile by sender email."""
     email_norm = (email or "").strip().lower()
     if not email_norm:
         raise HTTPException(status_code=400, detail="Email is required")
 
-    messages = conn.execute(
-        """
-        SELECT
-            gmail_id,
-            status,
-            first_name,
-            last_name,
-            full_name,
-            email,
-            subject,
-            received_at,
-            company,
-            body,
-            phone,
-            person_role,
-            is_priority,
-            pending_review,
-            company_name
-        FROM gmail_messages
-        WHERE lower(email) = ?
-        ORDER BY received_at DESC NULLS LAST, created_at DESC NULLS LAST
-        """,
-        [email_norm],
-    ).fetchall()
+    with get_conn() as conn:
+        messages = conn.execute(
+            """
+            SELECT
+                gmail_id, status, first_name, last_name, full_name, email, subject,
+                received_at, company, body, phone, person_role, is_priority,
+                pending_review, company_name
+            FROM gmail_messages
+            WHERE lower(email) = ?
+            ORDER BY received_at DESC NULLS LAST, created_at DESC NULLS LAST
+            """,
+            [email_norm],
+        ).fetchall()
 
     if not messages:
         raise HTTPException(status_code=404, detail="Lead profile not found")
 
-    # Latest message becomes the "current" view for status/pending flags.
     latest = messages[0]
-
     (
-        latest_gmail_id,
-        latest_status,
-        latest_first_name,
-        latest_last_name,
-        latest_full_name,
-        latest_email,
-        latest_subject,
-        latest_received_at,
-        latest_company,
-        latest_body,
-        latest_phone,
-        latest_person_role,
-        latest_is_priority,
-        latest_pending_review,
-        latest_company_name,
+        latest_gmail_id, latest_status, latest_first_name, latest_last_name,
+        latest_full_name, latest_email, latest_subject, latest_received_at,
+        latest_company, latest_body, latest_phone, latest_person_role,
+        latest_is_priority, latest_pending_review, latest_company_name,
     ) = latest
 
     name = (
@@ -186,76 +159,41 @@ def get_lead_profile(email: str):
         or "Unknown"
     )
 
-    # Collect all gmail_ids for status history.
     gmail_ids = [m[0] for m in messages]
 
-    history_rows = conn.execute(
-        """
-        SELECT
-            id,
-            changed_at,
-            lead_name,
-            status,
-            assignee,
-            rejection_reason
-        FROM lead_status_history
-        WHERE gmail_id IN ({placeholders})
-        ORDER BY changed_at DESC NULLS LAST
-        """.format(placeholders=",".join(["?"] * len(gmail_ids))),
-        gmail_ids,
-    ).fetchall()
+    with get_conn() as conn:
+        history_rows = conn.execute(
+            """
+            SELECT id, changed_at, lead_name, status, assignee, rejection_reason
+            FROM lead_status_history
+            WHERE gmail_id IN ({placeholders})
+            ORDER BY changed_at DESC NULLS LAST
+            """.format(placeholders=",".join(["?"] * len(gmail_ids))),
+            gmail_ids,
+        ).fetchall()
 
-    history = []
-    for row in history_rows:
-        changed_at = row[1]
-        if changed_at is not None and hasattr(changed_at, "isoformat"):
-            changed_at_val = changed_at.isoformat()
-        else:
-            changed_at_val = str(changed_at) if changed_at is not None else None
-        history.append(
-            {
-                "id": row[0],
-                "date": changed_at_val,
-                "leadName": row[2],
-                "status": row[3],
-                "assignee": row[4],
-                "rejection_reason": row[5],
-            }
-        )
+    history = [
+        {
+            "id": row[0],
+            "date": row[1].isoformat() if row[1] and hasattr(row[1], "isoformat") else str(row[1]),
+            "leadName": row[2],
+            "status": row[3],
+            "assignee": row[4],
+            "rejection_reason": row[5],
+        }
+        for row in history_rows
+    ]
 
-    emails = []
-    for m in messages:
-        (
-            gmail_id,
-            status,
-            first_name,
-            last_name,
-            full_name,
-            msg_email,
-            subject,
-            received_at,
-            company,
-            body,
-            phone,
-            person_role,
-            is_priority,
-            pending_review,
-            company_name,
-        ) = m
-
-        emails.append(
-            {
-                "gmail_id": gmail_id,
-                "status": status,
-                "subject": subject,
-                "received_at": (
-                    received_at.isoformat()
-                    if received_at is not None and hasattr(received_at, "isoformat")
-                    else (str(received_at) if received_at is not None else None)
-                ),
-                "body": body,
-            }
-        )
+    emails = [
+        {
+            "gmail_id": m[0],
+            "status": m[1],
+            "subject": m[6],
+            "received_at": m[7].isoformat() if m[7] and hasattr(m[7], "isoformat") else str(m[7]),
+            "body": m[9],
+        }
+        for m in messages
+    ]
 
     return {
         "id": latest_gmail_id,
