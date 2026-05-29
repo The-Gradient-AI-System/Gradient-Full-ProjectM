@@ -229,7 +229,8 @@ def _init_db_duckdb(conn) -> None:
         email TEXT NOT NULL,
         password TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'manager',
-        is_active BOOLEAN NOT NULL DEFAULT TRUE
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        avatar_url TEXT
     )
     """)
 
@@ -333,7 +334,8 @@ def _init_db_postgres(conn) -> None:
         email TEXT NOT NULL,
         password TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'manager',
-        is_active BOOLEAN NOT NULL DEFAULT TRUE
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        avatar_url TEXT
     )
     """)
 

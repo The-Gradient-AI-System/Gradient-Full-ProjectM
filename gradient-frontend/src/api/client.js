@@ -27,6 +27,24 @@ const resolveApiUrl = () => {
 
 const API_URL = resolveApiUrl();
 
+export const getApiUrl = () => API_URL;
+
+export const resolveAvatarUrl = (url) => {
+  if (!url) return '';
+  if (
+    url.startsWith('data:') ||
+    url.startsWith('blob:') ||
+    url.startsWith('http://') ||
+    url.startsWith('https://')
+  ) {
+    return url;
+  }
+  if (url.startsWith('/')) {
+    return `${API_URL}${url}`;
+  }
+  return `${API_URL}/${url}`;
+};
+
 
 
 let authToken = null;
@@ -338,11 +356,14 @@ export const updateMyPassword = (payload) =>
     body: JSON.stringify(payload),
   });
 
-export const updateMyAvatar = (payload) =>
-  request('/profile/me/avatar', {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
+export const updateMyAvatar = (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request('/users/avatar', {
+    method: 'POST',
+    body: formData,
   });
+};
 
 export const forgotPassword = (payload) =>
   request('/auth/forgot-password', {

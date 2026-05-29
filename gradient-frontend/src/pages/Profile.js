@@ -9,6 +9,7 @@ import {
   updateMyEmail,
   updateMyPassword,
   updateMyAvatar,
+  resolveAvatarUrl,
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -54,20 +55,63 @@ const Title = styled.h1`
   color: ${({ theme }) => theme.colors.text};
 `;
 
+const AvatarBlock = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 2rem;
+`;
+
 const AvatarWrapper = styled.div`
   position: relative;
   width: 148px;
   height: 148px;
   border-radius: 50%;
   overflow: hidden;
-  margin-bottom: 2rem;
   box-shadow: 0 0 0 4px ${({ theme }) => theme.colors.surface}, 0 18px 32px rgba(0, 0, 0, 0.18);
+`;
+
+const AvatarClickArea = styled.button`
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: ${({ disabled }) => (disabled ? 'wait' : 'pointer')};
+
+  &:disabled {
+    opacity: 0.85;
+  }
 `;
 
 const AvatarImage = styled.img`
   width: 100%;
   height: 100%;
   object-fit: cover;
+  pointer-events: none;
+`;
+
+const ChangeAvatarButton = styled.button`
+  margin-top: 0.85rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: ${({ theme }) => theme.colors.primary};
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+
+  &:hover:not(:disabled) {
+    opacity: 0.85;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: wait;
+  }
 `;
 
 const AvatarOverlay = styled.button`
@@ -218,10 +262,10 @@ const FieldSection = ({ title, children }) => (
 
 const Profile = () => {
   const fileInputRef = useRef(null);
-  const { user, setUser } = useAuth();
+  const { user, setUser, updateUserAvatar } = useAuth();
 
-  // --- avatar ---
-  const [avatar, setAvatar] = useState(userAvatar);
+  // --- avatar (stores relative path from API, e.g. /static/avatars/avatar_1.png) ---
+  const [avatar, setAvatar] = useState(user?.avatar_url || '');
   const [avatarLoading, setAvatarLoading] = useState(false);
   const [avatarFeedback, setAvatarFeedback] = useState(null); // {msg, error}
 
@@ -252,7 +296,7 @@ const Profile = () => {
         if (cancelled || !profile) return;
         setUsername(profile.username || '');
         setEmail(profile.email || '');
-        setAvatar(profile.avatar_url || userAvatar);
+        setAvatar(profile.avatar_url || '');
       } catch {
         // silently ignore — user can still edit
       }
@@ -268,27 +312,29 @@ const Profile = () => {
   // --- Avatar handlers ---
   const triggerFilePicker = () => fileInputRef.current?.click();
 
-  const handleAvatarChange = event => {
+  const handleAvatarChange = async event => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      if (typeof reader.result !== 'string') return;
-      const dataUrl = reader.result;
-      setAvatar(dataUrl);
-      setAvatarLoading(true);
-      setAvatarFeedback(null);
-      try {
-        await updateMyAvatar({ avatar_url: dataUrl });
-        setUser(prev => ({ ...(prev || {}), avatar_url: dataUrl }));
-        setAvatarFeedback({ msg: 'Фото оновлено', error: false });
-      } catch (err) {
-        setAvatarFeedback({ msg: err?.message || 'Помилка оновлення фото', error: true });
-      } finally {
-        setAvatarLoading(false);
-      }
-    };
-    reader.readAsDataURL(file);
+
+    const previewUrl = URL.createObjectURL(file);
+    setAvatar(previewUrl);
+    setAvatarLoading(true);
+    setAvatarFeedback(null);
+
+    try {
+      const result = await updateMyAvatar(file);
+      const savedUrl = result?.avatar_url || '';
+      setAvatar(savedUrl);
+      updateUserAvatar(savedUrl);
+      setAvatarFeedback({ msg: 'Фото оновлено', error: false });
+    } catch (err) {
+      setAvatar(user?.avatar_url || '');
+      setAvatarFeedback({ msg: err?.message || 'Помилка оновлення фото', error: true });
+    } finally {
+      URL.revokeObjectURL(previewUrl);
+      setAvatarLoading(false);
+      event.target.value = '';
+    }
   };
 
   // --- Username handler ---
@@ -350,30 +396,52 @@ const Profile = () => {
         <Title>Профіль</Title>
 
         {/* Avatar */}
-        <AvatarWrapper>
-          <AvatarImage src={avatar} alt="Аватар користувача" />
-          <AvatarOverlay
+        <AvatarBlock>
+          <AvatarWrapper>
+            <AvatarClickArea
+              type="button"
+              onClick={triggerFilePicker}
+              disabled={avatarLoading}
+              title="Змінити аватар"
+              aria-label="Змінити аватар"
+            >
+              <AvatarImage
+                src={resolveAvatarUrl(avatar || user?.avatar_url) || userAvatar}
+                alt="Аватар користувача"
+              />
+            </AvatarClickArea>
+            <AvatarOverlay
+              type="button"
+              onClick={triggerFilePicker}
+              title="Оновити фото"
+              disabled={avatarLoading}
+              aria-label="Оновити фото"
+            >
+              <FiCamera size={18} />
+            </AvatarOverlay>
+          </AvatarWrapper>
+          <ChangeAvatarButton
             type="button"
             onClick={triggerFilePicker}
-            title="Оновити фото"
             disabled={avatarLoading}
           >
-            <FiCamera size={18} />
-          </AvatarOverlay>
+            {avatarLoading ? 'Завантаження...' : 'Змінити аватар'}
+          </ChangeAvatarButton>
           <input
             ref={fileInputRef}
             type="file"
             accept="image/*"
             onChange={handleAvatarChange}
             style={{ display: 'none' }}
+            aria-hidden="true"
           />
-        </AvatarWrapper>
-        {avatarFeedback && (
-          <FeedbackBadge $error={avatarFeedback.error}>
-            {avatarFeedback.error ? <FiX size={13} /> : <FiCheck size={13} />}
-            {avatarFeedback.msg}
-          </FeedbackBadge>
-        )}
+          {avatarFeedback && (
+            <FeedbackBadge $error={avatarFeedback.error} style={{ marginTop: '0.65rem' }}>
+              {avatarFeedback.error ? <FiX size={13} /> : <FiCheck size={13} />}
+              {avatarFeedback.msg}
+            </FeedbackBadge>
+          )}
+        </AvatarBlock>
 
         <Divider style={{ marginTop: '1.5rem' }} />
 

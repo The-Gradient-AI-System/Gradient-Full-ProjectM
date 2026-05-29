@@ -9,6 +9,7 @@ import userAvatar from '../assets/user.jpg';
 import ThemeToggle from './ThemeToggle';
 
 import { useAuth } from '../context/AuthContext';
+import { resolveAvatarUrl } from '../api/client';
 
 
 
@@ -492,7 +493,7 @@ const Header = () => {
 
           <UserAvatar>
 
-            <AvatarImage src={user?.avatar_url || userAvatar} alt="User avatar" />
+            <AvatarImage src={resolveAvatarUrl(user?.avatar_url) || userAvatar} alt="User avatar" />
 
             <StatusIndicator />
 
@@ -508,7 +509,7 @@ const Header = () => {
 
               <UserAvatar>
 
-                <AvatarImage src={user?.avatar_url || userAvatar} alt="User avatar" />
+                <AvatarImage src={resolveAvatarUrl(user?.avatar_url) || userAvatar} alt="User avatar" />
 
                 <StatusIndicator />
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { FiUser } from 'react-icons/fi';
-import { getManagersStatus } from '../api/client';
+import { getManagersStatus, resolveAvatarUrl } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
 const SidebarContainer = styled.aside`
@@ -153,7 +153,7 @@ const Sidebar = () => {
       managers.map((manager) => ({
         id: manager.id,
         name: manager.username || manager.email || 'Менеджер',
-        avatar: manager.avatar_url || '',
+        avatar: resolveAvatarUrl(manager.avatar_url) || '',
         status: manager.is_online ? 'online' : 'away',
       })),
     [managers]

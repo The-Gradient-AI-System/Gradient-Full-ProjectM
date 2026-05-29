@@ -27,6 +27,38 @@ const LAST_SEEN_LEAD_KEY = 'gradient:lastSeenLeadTime';
 
 const LEAD_SNAPSHOT_KEY = 'gradient:displayedLeadSnapshot';
 
+const USER_PROFILE_KEY = 'gradient:userProfile';
+
+const readUserProfile = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(USER_PROFILE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (storageError) {
+    console.error('Не вдалося зчитати профіль користувача', storageError);
+    return null;
+  }
+};
+
+const writeUserProfile = (user) => {
+  if (typeof window === 'undefined' || !user) return;
+  try {
+    window.localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(user));
+  } catch (storageError) {
+    console.error('Не вдалося зберегти профіль користувача', storageError);
+  }
+};
+
+const clearUserProfile = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(USER_PROFILE_KEY);
+  } catch (storageError) {
+    console.error('Не вдалося очистити профіль користувача', storageError);
+  }
+};
+
 
 
 const readLastSeenLeadTime = () => {
@@ -335,7 +367,14 @@ export const AuthProvider = ({ children }) => {
         const payload = decodeJwtPayload(storedToken);
         const role = payload?.role || 'manager';
         const username = payload?.sub || null;
-        return { username: username || 'User', email: username || 'User', role, avatar_url: '' };
+        const cached = readUserProfile();
+        return {
+          username: cached?.username || username || 'User',
+          email: cached?.email || username || 'User',
+          role: cached?.role || role,
+          id: cached?.id ?? null,
+          avatar_url: cached?.avatar_url || '',
+        };
       });
 
     }
@@ -349,14 +388,18 @@ export const AuthProvider = ({ children }) => {
       try {
         const profile = await getMyProfile();
         if (cancelled || !profile) return;
-        setUser((prev) => ({
-          ...(prev || {}),
-          id: profile.id ?? prev?.id ?? null,
-          username: profile.username || prev?.username || 'User',
-          email: profile.email || prev?.email || '',
-          role: profile.role || prev?.role || 'manager',
-          avatar_url: profile.avatar_url || '',
-        }));
+        setUser((prev) => {
+          const next = {
+            ...(prev || {}),
+            id: profile.id ?? prev?.id ?? null,
+            username: profile.username || prev?.username || 'User',
+            email: profile.email || prev?.email || '',
+            role: profile.role || prev?.role || 'manager',
+            avatar_url: profile.avatar_url || '',
+          };
+          writeUserProfile(next);
+          return next;
+        });
       } catch (error) {
         console.warn('Не вдалося завантажити профіль користувача', error);
       }
@@ -382,6 +425,7 @@ export const AuthProvider = ({ children }) => {
     setToken(null);
 
     setUser(null);
+    clearUserProfile();
 
     setError(null);
 
@@ -403,7 +447,13 @@ export const AuthProvider = ({ children }) => {
 
   }, []);
 
-
+  const updateUserAvatar = useCallback((avatarUrl) => {
+    setUser((prev) => {
+      const next = { ...(prev || {}), avatar_url: avatarUrl || '' };
+      writeUserProfile(next);
+      return next;
+    });
+  }, []);
 
   const login = useCallback(async ({ email, password }) => {
 
@@ -450,13 +500,15 @@ export const AuthProvider = ({ children }) => {
       try {
         const profile = await getMyProfile();
         if (profile) {
-          setUser({
+          const nextUser = {
             id: profile.id ?? null,
             username: profile.username || email,
             email: profile.email || email,
             role: profile.role || userRole,
             avatar_url: profile.avatar_url || '',
-          });
+          };
+          setUser(nextUser);
+          writeUserProfile(nextUser);
         }
       } catch (profileError) {
         console.warn('Не вдалося отримати профіль після входу', profileError);
@@ -654,6 +706,7 @@ export const AuthProvider = ({ children }) => {
 
       updateLeadSnapshot,
       setUser,
+      updateUserAvatar,
 
     }),
 
@@ -681,6 +734,7 @@ export const AuthProvider = ({ children }) => {
 
       updateLeadSnapshot,
       setUser,
+      updateUserAvatar,
 
     ]
 
