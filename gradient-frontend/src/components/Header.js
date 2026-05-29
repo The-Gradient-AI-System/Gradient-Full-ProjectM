@@ -462,9 +462,9 @@ const Header = () => {
 
 
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
 
-    logout();
+    await logout();
 
     closeMenu();
 

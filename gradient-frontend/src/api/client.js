@@ -175,6 +175,16 @@ export const loginRequest = credentials =>
 
 
 
+export const logoutRequest = () =>
+
+  request('/auth/logout', {
+
+    method: 'POST',
+
+  });
+
+
+
 export const registerRequest = payload =>
 
   request('/auth/register', {
@@ -271,6 +281,8 @@ export const updateReplyPrompts = (payload) =>
   });
 
 export const getManagers = () => request('/admin/managers');
+
+export const getManagersStatus = () => request('/users/managers/status');
 
 export const createManager = (payload) =>
   request('/admin/managers', {

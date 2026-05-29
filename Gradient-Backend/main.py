@@ -2,7 +2,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes.userRoutes import router as user_router
+from routes.userRoutes import router as user_router, users_router
 from routes.gmailRoutes import router as gmail_router
 from routes.settingsRoutes import router as settings_router
 from routes.managerRoutes import router as manager_router
@@ -38,6 +38,7 @@ app.add_middleware(
 )
 
 app.include_router(user_router)
+app.include_router(users_router)
 app.include_router(gmail_router)
 app.include_router(settings_router)
 app.include_router(manager_router)

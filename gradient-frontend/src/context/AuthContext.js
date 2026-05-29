@@ -8,6 +8,8 @@ import {
 
   loginRequest,
 
+  logoutRequest,
+
   setAuthToken,
 
   getGmailLeads,
@@ -367,7 +369,13 @@ export const AuthProvider = ({ children }) => {
 
 
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+
+    try {
+      await logoutRequest();
+    } catch (logoutError) {
+      console.warn('Не вдалося повідомити сервер про вихід', logoutError);
+    }
 
     clearAuthToken();
 

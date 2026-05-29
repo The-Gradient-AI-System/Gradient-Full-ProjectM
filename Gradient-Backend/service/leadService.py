@@ -5,11 +5,13 @@ from jose import jwt, JWTError
 import os
 import uuid
 
+from service.userService import update_user_last_seen
+
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
 
-def get_current_user_role(token: str) -> dict:
+def get_current_user_role(token: str, *, update_activity: bool = True) -> dict:
     """Extract user info from JWT token."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -38,7 +40,12 @@ def get_current_user_role(token: str) -> dict:
                 detail="User is inactive",
             )
 
-        return {"id": user[0], "username": user[1], "role": user[2]}
+        user_info = {"id": user[0], "username": user[1], "role": user[2]}
+
+        if update_activity and user_info["role"] == "manager":
+            update_user_last_seen(user_info["id"])
+
+        return user_info
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
