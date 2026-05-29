@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { FiUser } from 'react-icons/fi';
-import { getManagers } from '../api/client';
+import { getManagersStatus, resolveAvatarUrl } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
 const SidebarContainer = styled.aside`
@@ -116,11 +116,14 @@ const Sidebar = () => {
   useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
-    const loadManagers = async () => {
-      setLoading(true);
-      setErrorText('');
+
+    const loadManagers = async ({ showLoading = false } = {}) => {
+      if (showLoading) {
+        setLoading(true);
+        setErrorText('');
+      }
       try {
-        const data = await getManagers();
+        const data = await getManagersStatus();
         if (!cancelled) {
           setManagers(data?.managers || []);
         }
@@ -130,14 +133,18 @@ const Sidebar = () => {
           setErrorText(error?.message || 'Не вдалося завантажити менеджерів.');
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && showLoading) {
           setLoading(false);
         }
       }
     };
-    loadManagers();
+
+    loadManagers({ showLoading: true });
+    const intervalId = window.setInterval(() => loadManagers(), 10000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
   }, [isAdmin]);
 
@@ -146,8 +153,8 @@ const Sidebar = () => {
       managers.map((manager) => ({
         id: manager.id,
         name: manager.username || manager.email || 'Менеджер',
-        avatar: manager.avatar_url || '',
-        status: manager.is_active ? 'online' : 'away',
+        avatar: resolveAvatarUrl(manager.avatar_url) || '',
+        status: manager.is_online ? 'online' : 'away',
       })),
     [managers]
   );

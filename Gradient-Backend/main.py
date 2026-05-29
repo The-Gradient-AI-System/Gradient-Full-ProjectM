@@ -1,8 +1,10 @@
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes.userRoutes import router as user_router
+from fastapi.staticfiles import StaticFiles
+from routes.userRoutes import router as user_router, users_router
 from routes.gmailRoutes import router as gmail_router
 from routes.settingsRoutes import router as settings_router
 from routes.managerRoutes import router as manager_router
@@ -14,6 +16,11 @@ from service.autosyncService import auto_sync_loop
 import asyncio
 
 app = FastAPI()
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+AVATARS_DIR = STATIC_DIR / "avatars"
+AVATARS_DIR.mkdir(parents=True, exist_ok=True)
 
 default_origins = [
     "http://localhost:3000",
@@ -38,6 +45,7 @@ app.add_middleware(
 )
 
 app.include_router(user_router)
+app.include_router(users_router)
 app.include_router(gmail_router)
 app.include_router(settings_router)
 app.include_router(manager_router)
@@ -46,6 +54,8 @@ app.include_router(password_reset_router)
 app.include_router(lead_router)
 app.include_router(emailRoutes.router)
 app.include_router(emailRoutes.emails_router)
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.on_event("startup")
 async def startup():

@@ -229,12 +229,14 @@ def _init_db_duckdb(conn) -> None:
         email TEXT NOT NULL,
         password TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'manager',
-        is_active BOOLEAN NOT NULL DEFAULT TRUE
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        avatar_url TEXT
     )
     """)
 
     _ensure_column(conn, "users", "is_active", "BOOLEAN DEFAULT TRUE")
     _ensure_column(conn, "users", "avatar_url", "TEXT")
+    _ensure_column(conn, "users", "last_seen", "TIMESTAMP")
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS processed_emails (
@@ -332,12 +334,14 @@ def _init_db_postgres(conn) -> None:
         email TEXT NOT NULL,
         password TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'manager',
-        is_active BOOLEAN NOT NULL DEFAULT TRUE
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        avatar_url TEXT
     )
     """)
 
     _ensure_column(conn, "users", "is_active", "BOOLEAN DEFAULT TRUE")
     _ensure_column(conn, "users", "avatar_url", "TEXT")
+    _ensure_column(conn, "users", "last_seen", "TIMESTAMP")
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS processed_emails (

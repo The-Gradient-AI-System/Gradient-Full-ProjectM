@@ -938,6 +938,24 @@ const StatusBadge = styled.button`
 
 `;
 
+const ActionByBadge = styled.span`
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  display: inline-block;
+  color: #2B3674;
+  background: #ffffff;
+  border: 1px solid rgba(43, 54, 116, 0.28);
+`;
+
+const ActionByUsername = styled.span`
+  color: #040f4d;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+`;
+
 
 
 const EmptyState = styled.div`
@@ -3853,7 +3871,9 @@ const Automation = () => {
                             {badgeLabel}
                           </StatusBadge>
                           {lead.last_action_by && (
-                            <LeadMeta>Дію виконав: {lead.last_action_by}</LeadMeta>
+                            <ActionByBadge>
+                              Дію виконав: <ActionByUsername>{lead.last_action_by}</ActionByUsername>
+                            </ActionByBadge>
                           )}
                           {decision && (
 
@@ -3910,7 +3930,9 @@ const Automation = () => {
                 </ModalTitleRow>
 
                 {selectedLead.last_action_by && (
-                  <MetaHint>Дію виконав: {selectedLead.last_action_by}</MetaHint>
+                  <ActionByBadge>
+                    Дію виконав: <ActionByUsername>{selectedLead.last_action_by}</ActionByUsername>
+                  </ActionByBadge>
                 )}
 
                 <ModalMeta>

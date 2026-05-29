@@ -16,6 +16,73 @@ try:
 except ValueError:
     ACCESS_TOKEN_EXPIRE_HOURS = 2
 
+try:
+    ONLINE_THRESHOLD_MINUTES = int(os.getenv("ONLINE_THRESHOLD_MINUTES", "5"))
+except ValueError:
+    ONLINE_THRESHOLD_MINUTES = 5
+
+
+def update_user_last_seen(user_id: int) -> None:
+    with db_lock:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET last_seen = ? WHERE id = ?",
+                [datetime.utcnow(), user_id],
+            )
+            conn.commit()
+
+
+def mark_user_offline(user_id: int) -> None:
+    with db_lock:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET last_seen = NULL WHERE id = ?",
+                [user_id],
+            )
+            conn.commit()
+
+
+def _parse_last_seen(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+    return None
+
+
+def get_managers_with_online_status() -> list[dict]:
+    threshold = datetime.utcnow() - timedelta(minutes=ONLINE_THRESHOLD_MINUTES)
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, username, avatar_url, last_seen
+            FROM users
+            WHERE role = 'manager'
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    managers = []
+    for row in rows:
+        last_seen = _parse_last_seen(row[3])
+        is_online = last_seen is not None and last_seen >= threshold
+        managers.append(
+            {
+                "id": row[0],
+                "username": row[1],
+                "avatar_url": row[2] or "",
+                "is_online": is_online,
+            }
+        )
+    return managers
+
 
 def register_user(user):
     with db_lock:
@@ -82,5 +149,16 @@ def login_user(user):
             detail="Invalid username or password",
         )
 
-    access_token = create_access_token({"sub": stored_username, "role": user_role or "manager"})
-    return {"access_token": access_token, "token_type": "bearer", "role": user_role or "manager"}
+    role = user_role or "manager"
+
+    with get_conn() as conn:
+        user_id = conn.execute(
+            "SELECT id FROM users WHERE username = ?",
+            [stored_username],
+        ).fetchone()
+
+    if user_id and role == "manager":
+        update_user_last_seen(user_id[0])
+
+    access_token = create_access_token({"sub": stored_username, "role": role})
+    return {"access_token": access_token, "token_type": "bearer", "role": role}

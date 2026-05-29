@@ -30,10 +30,6 @@ class UpdatePasswordPayload(BaseModel):
     new_password: str = Field(min_length=6)
 
 
-class UpdateAvatarPayload(BaseModel):
-    avatar_url: Optional[str] = None
-
-
 class UpdateProfilePayload(BaseModel):
     username: Optional[str] = Field(default=None, min_length=1)
     email: Optional[EmailStr] = None
@@ -158,31 +154,6 @@ def update_password(payload: UpdatePasswordPayload, user_info: dict = Depends(ge
             write_conn.commit()
 
     return {"msg": "Пароль успішно змінено"}
-
-
-@router.patch("/me/avatar")
-def update_avatar(payload: UpdateAvatarPayload, user_info: dict = Depends(get_user_from_token)):
-    avatar_url = (payload.avatar_url or "").strip()
-
-    with db_lock:
-        # Step 1: check user exists
-        with get_conn() as read_conn:
-            exists = read_conn.execute(
-                "SELECT 1 FROM users WHERE id = ?",
-                [user_info["id"]],
-            ).fetchone()
-            if not exists:
-                raise HTTPException(status_code=404, detail="User not found")
-
-        # Step 2: write
-        with get_conn() as write_conn:
-            write_conn.execute(
-                "UPDATE users SET avatar_url = ? WHERE id = ?",
-                [avatar_url, user_info["id"]],
-            )
-            write_conn.commit()
-
-    return {"avatar_url": avatar_url}
 
 
 @router.put("/me")
