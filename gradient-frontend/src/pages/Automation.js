@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styled, { useTheme } from 'styled-components';
-import { getGmailLeads, postGmailSync, postGenerateReplies, postLeadStatus, postLeadInsights, postEmailAction, sendEmailWithAttachments } from '../api/client';
+import { getGmailLeads, postGmailSync, postGenerateReplies, postLeadInsights, postEmailAction, sendEmailWithAttachments } from '../api/client';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -1562,16 +1562,6 @@ const BadgeColumn = styled.div`
 
 
 
-const DecisionNote = styled.span`
-
-  font-size: 0.82rem;
-
-  color: ${({ theme }) => theme.colors.subtleText};
-
-`;
-
-
-
 const SearchResults = styled.div`
 
   display: flex;
@@ -2587,24 +2577,6 @@ const ReplyStatusMessage = styled.p`
 
 
 
-const DECISION_LABELS = {
-
-  confirmed: 'Підтверджено',
-
-  rejected: 'Відхилено',
-
-  snoozed: 'Відкладено',
-
-  postponed: 'Відкладено',
-
-  in_work: 'В роботі',
-
-  restored: 'Відновлено',
-
-};
-
-
-
 const DECISION_ROW_TONES = {
 
   confirmed: 'rgba(31, 226, 155, 0.12)',
@@ -2654,8 +2626,6 @@ const Automation = () => {
   const rangeRef = useRef(null);
 
   const [selectedLead, setSelectedLead] = useState(null);
-
-  const [decisions, setDecisions] = useState({});
 
   const [insightsError, setInsightsError] = useState(null);
 
@@ -2790,8 +2760,7 @@ const Automation = () => {
 
       const qualified = isQualifiedLead(lead);
 
-      const decisionStatus = decisions[getLeadKey(lead)]?.status;
-      const status = normalizeEmailStatus(decisionStatus ?? getLeadStatus(lead));
+      const status = normalizeEmailStatus(getLeadStatus(lead));
       const badgeVariantForFilter =
         status === 'call_lead'
           ? 'call_lead'
@@ -2845,7 +2814,7 @@ const Automation = () => {
 
     });
 
-  }, [visibleLeads, stageFilter, searchTerm, rangeFilter, decisions]);
+  }, [visibleLeads, stageFilter, searchTerm, rangeFilter]);
 
 
 
@@ -2883,9 +2852,7 @@ const Automation = () => {
 
     visibleLeads.forEach((lead) => {
 
-      const decisionStatus = decisions[getLeadKey(lead)]?.status;
-
-      const status = (decisionStatus ?? getLeadStatus(lead) ?? '').toLowerCase();
+      const status = (getLeadStatus(lead) ?? '').toLowerCase();
 
 
 
@@ -2941,7 +2908,7 @@ const Automation = () => {
 
     };
 
-  }, [visibleLeads, decisions]);
+  }, [visibleLeads]);
 
 
 
@@ -3262,83 +3229,6 @@ const Automation = () => {
       .then(() => refresh({ isManualRefresh: true }))
       .catch((err) => console.warn('Gmail sync failed:', err));
   }, [refresh]);
-
-  const handleDecisionWithReason = useCallback(
-    async (status, rejectionReason) => {
-      if (!selectedLead) return;
-
-      const gmailId = selectedLead.gmail_id || selectedLead.gmailId;
-      const rowNumber = selectedLead.sheet_row || selectedLead.sheetRow;
-      if (!gmailId && !rowNumber) {
-        setStatusError('Не знайдено ідентифікатор ліда для збереження статусу.');
-        return;
-      }
-
-      let targetStatus = status;
-
-      const decidedAt = new Date().toISOString();
-      setDecisions((prev) => ({
-        ...prev,
-        [getLeadKey(selectedLead)]: {
-          status: targetStatus,
-          decidedAt,
-          rejectionReason,
-        },
-      }));
-      setStatusError(null);
-
-      if (targetStatus !== 'in_work' && targetStatus !== 'postponed') {
-        closeLocalModal();
-      }
-
-      try {
-        let response;
-        if (gmailId) {
-          response = await postLeadStatus({ 
-            gmail_id: gmailId, 
-            status: targetStatus,
-            rejection_reason: rejectionReason 
-          });
-        } else {
-          response = await postLeadStatus({ 
-            row_number: rowNumber, 
-            status: targetStatus,
-            rejection_reason: rejectionReason 
-          });
-        }
-        
-        // Update local selected lead status so UI updates immediately
-        const finalStatusFromServer = response?.status || targetStatus;
-        setSelectedLead(prev => prev ? { ...prev, status: finalStatusFromServer } : null);
-
-        await refresh({ isManualRefresh: true });
-
-        if (targetStatus === 'postponed') {
-          closeLocalModal();
-          setSelectedLead(null);
-          setShowReader(false);
-          navigate('/work-zone', { replace: true });
-        }
-
-        pushNotification({
-          variant: 'success',
-          title: 'Статус оновлено',
-          message: `Статус змінено на "${BADGE_LABELS[targetStatus] || targetStatus}"${rejectionReason ? ` з причиною: ${rejectionReason}` : ''}`,
-        });
-      } catch (error) {
-        setDecisions((prev) => {
-          const key = getLeadKey(selectedLead);
-          const updated = { ...prev };
-          delete updated[key];
-          return updated;
-        });
-        setStatusError(error instanceof Error ? error.message : 'Не вдалося оновити статус.');
-      }
-    },
-    [selectedLead, refresh, pushNotification, closeLocalModal, navigate]
-  );
-
-  const handleDecision = useCallback((status) => handleDecisionWithReason(status, null), [handleDecisionWithReason]);
 
   const handleEmailAction = useCallback(
     async (action) => {
@@ -3772,11 +3662,7 @@ const Automation = () => {
 
                 {filteredLeads.map((lead, index) => {
 
-                  const qualified = isQualifiedLead(lead);
-
                   const key = getLeadKey(lead);
-
-                  const decision = decisions[key];
 
                   const leadStatus = getLeadStatus(lead);
 
@@ -3875,16 +3761,6 @@ const Automation = () => {
                               Дію виконав: <ActionByUsername>{lead.last_action_by}</ActionByUsername>
                             </ActionByBadge>
                           )}
-                          {decision && (
-
-                            <DecisionNote>
-
-                              {`Рішення: ${DECISION_LABELS[decision.status]} • ${formatRelative(decision.decidedAt)}`}
-
-                            </DecisionNote>
-
-                          )}
-
                         </BadgeColumn>
 
                       </td>
