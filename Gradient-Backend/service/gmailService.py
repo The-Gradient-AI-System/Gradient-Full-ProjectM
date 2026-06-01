@@ -274,7 +274,7 @@ def fetch_new_gmail_data(limit: int = 20):
         final_sender_name = parsed.get("full_name") if parsed.get("full_name") else sender_name
         
         # Get company info if company name is available
-        company_info = parsed.get("company_summary") or "No company info"
+        company_info = parsed.get("company_summary") or ""
         person_summary = parsed.get("person_summary")
         first_name = parsed.get("first_name")
         last_name = parsed.get("last_name")

@@ -60,15 +60,36 @@ const parseJsonList = (value) => {
 
 const normalizeLeadInsights = (lead) => {
   if (!lead) return null;
+  const companySummary = lead.company_summary || lead.company_info || '';
+  const personSummary = lead.person_summary || '';
   return {
     ...lead,
     person_links: parseJsonList(lead.person_links),
     person_insights: parseJsonList(lead.person_insights),
     company_insights: parseJsonList(lead.company_insights),
-    company: lead.company || '',
+    company: lead.company || lead.company_name || '',
     website: lead.website || '',
-    company_summary: lead.company_summary || '',
+    company_summary: companySummary,
+    company_info: companySummary,
+    person_summary: personSummary,
+    phone_number: lead.phone_number || lead.phone || '',
+    person_role: lead.person_role || '',
+    person_location: lead.person_location || '',
+    person_experience: lead.person_experience || '',
   };
+};
+
+const isLeadProfileIncomplete = (lead) => {
+  if (!lead) return true;
+  const companyInfo = (lead.company_info || lead.company_summary || '').trim();
+  const hasWeakCompany = !companyInfo || companyInfo.toLowerCase() === 'no company info';
+  return (
+    !lead.person_summary?.trim() ||
+    hasWeakCompany ||
+    !lead.person_role?.trim() ||
+    !lead.person_location?.trim() ||
+    !lead.person_experience?.trim()
+  );
 };
 
 const useLeadData = (snapshot, updateSnapshot) => {
@@ -1492,6 +1513,20 @@ const SummaryLabel = styled.span`
 
 
 
+const SummarySubLabel = styled.strong`
+
+  display: block;
+
+  margin-bottom: 0.35rem;
+
+  font-size: 0.82rem;
+
+  color: ${({ theme }) => theme.colors.primary};
+
+`;
+
+
+
 const SummaryText = styled.p`
 
   margin: 0;
@@ -2703,8 +2738,7 @@ const Automation = () => {
     setReplyStyle('semi_official');
 
     try {
-      const needsEnrichment = !lead?.full_name && !lead?.company_info && !lead?.person_summary;
-      if (!needsEnrichment) return;
+      if (!isLeadProfileIncomplete(lead)) return;
 
       const enriched = await postLeadInsights({
         sender: lead.email || 'unknown@example.com',
@@ -2712,7 +2746,7 @@ const Automation = () => {
         body: lead.body || '',
       });
       if (enriched) {
-        setSelectedLead((prev) => ({ ...(prev || lead), ...enriched }));
+        setSelectedLead((prev) => normalizeLeadInsights({ ...(prev || lead), ...enriched }));
       }
     } catch (err) {
       setInsightsError(err?.message || 'Не вдалося завантажити інсайти.');
@@ -3919,7 +3953,7 @@ const Automation = () => {
 
                                 <InfoLabel>Роль</InfoLabel>
 
-                                <InfoValue>{selectedInsights?.person_role || selectedPerson?.snippet || 'Потребує уточнення'}</InfoValue>
+                                <InfoValue>{selectedInsights?.person_role || selectedPerson?.snippet || '—'}</InfoValue>
 
                               </InfoRow>
 
@@ -3962,13 +3996,25 @@ const Automation = () => {
                               <SummaryLabel>Коротко</SummaryLabel>
 
                               {selectedInsights?.person_summary ? (
-
-                                <SummaryText>{selectedInsights.person_summary}</SummaryText>
-
+                                <>
+                                  <SummarySubLabel>Про контакт</SummarySubLabel>
+                                  <SummaryText>{selectedInsights.person_summary}</SummaryText>
+                                </>
                               ) : (
+                                <SummaryHint>Немає зведеної інформації про контакт</SummaryHint>
+                              )}
 
-                                <SummaryHint>Немає зведеної інформації</SummaryHint>
-
+                              {(selectedInsights?.company_summary || selectedCompanySummary) ? (
+                                <>
+                                  <SummarySubLabel style={{ marginTop: '0.85rem' }}>Про компанію</SummarySubLabel>
+                                  <SummaryText>
+                                    {selectedInsights?.company_summary || selectedCompanySummary}
+                                  </SummaryText>
+                                </>
+                              ) : (
+                                <SummaryHint style={{ marginTop: '0.85rem' }}>
+                                  Немає зведеної інформації про компанію
+                                </SummaryHint>
                               )}
 
                             </SummaryBlock>
@@ -4053,37 +4099,7 @@ const Automation = () => {
 
                               </InfoRow>
 
-                              <InfoRow>
-
-                                <InfoLabel>Підсумок</InfoLabel>
-
-                                <InfoValue>{selectedInsights?.company_summary || 'Дані не знайдено.'}</InfoValue>
-
-                              </InfoRow>
-
                             </InfoGrid>
-
-                            {(selectedInsights?.company_summary || selectedCompanySummary) && (
-
-                              <SummaryBlock>
-
-                                <SummaryLabel>Коротко про компанію</SummaryLabel>
-
-                                {selectedInsights?.company_summary ? (
-
-                                  <SummaryText>{selectedInsights.company_summary}</SummaryText>
-
-                                ) : null}
-
-                                {selectedCompanySummary && (
-
-                                  <SummaryHint>{selectedCompanySummary}</SummaryHint>
-
-                                )}
-
-                              </SummaryBlock>
-
-                            )}
 
                             {!!selectedCompanyInsights.length && (
 

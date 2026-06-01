@@ -52,6 +52,10 @@ def test_analyze_email_without_company_search(monkeypatch):
         "currency": None,
         "phone_number": None,
         "website": None,
+        "person_role": "Sales Manager",
+        "person_location": "Kyiv, Ukraine",
+        "person_experience": "5+ years",
+        "person_summary": "John Doe — sales manager.",
     }
 
     _install_fake_openai_client(ai_service, base_json_obj, final_json_obj)
@@ -88,6 +92,10 @@ def test_analyze_email_with_tool_call(monkeypatch):
         "currency": None,
         "phone_number": None,
         "website": "https://www.softserveinc.com",
+        "person_role": "HR Manager",
+        "person_location": "Lviv, Ukraine",
+        "person_experience": "Senior level",
+        "person_summary": "Ivan — HR manager у SoftServe.",
     }
 
     # Avoid real network enrichment
@@ -111,3 +119,37 @@ def test_company_candidate_from_domain(monkeypatch):
 
     assert ai_service._company_candidate_from_sender_email("a@nova-poshta.ua") == "Nova Poshta"
     assert ai_service._company_candidate_from_sender_email("a@gmail.com") is None
+
+
+def test_dedupe_text_removes_repeated_paragraph():
+    import service.aiService as ai_service
+
+    text = "Same paragraph. Same paragraph."
+    assert ai_service._dedupe_text(text) == "Same paragraph."
+
+
+def test_finalize_lead_analysis_fills_missing_role_from_search():
+    import service.aiService as ai_service
+
+    result = ai_service._finalize_lead_analysis(
+        {
+            "full_name": "Daniel Moore",
+            "company": "Microsoft",
+            "person_summary": "Daniel Moore is a partner. Daniel Moore is a partner.",
+        },
+        sender="daniel@example.com",
+        company_candidate="Microsoft",
+        person_insights=[
+            {
+                "title": "Daniel Moore - Managing Partner at Microsoft | LinkedIn",
+                "snippet": "15+ years in enterprise technology",
+                "url": "https://linkedin.com/in/daniel",
+            }
+        ],
+        company_insights=[],
+    )
+
+    assert result["person_role"] == "Managing Partner"
+    assert result["person_experience"] == "15+ years"
+    assert "Daniel Moore is a partner." in (result["person_summary"] or "")
+    assert (result["person_summary"] or "").count("Daniel Moore is a partner.") == 1
