@@ -202,6 +202,19 @@ _APP_SETTINGS_SEED = [
 ]
 
 
+def _ensure_users_role_constraint(conn) -> None:
+    """Allow owner/admin/manager on Postgres (legacy CHECK may omit owner)."""
+    if not USE_POSTGRES:
+        return
+    conn.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check")
+    conn.execute(
+        """
+        ALTER TABLE users ADD CONSTRAINT users_role_check
+        CHECK (role IN ('owner', 'admin', 'manager'))
+        """
+    )
+
+
 def _migrate_user_roles(conn) -> None:
     """Ensure at least one owner exists (legacy DBs may lack the owner role)."""
     owner_row = conn.execute(
@@ -469,6 +482,7 @@ def init_db() -> None:
     with get_conn() as conn:
         if USE_POSTGRES:
             _init_db_postgres(conn)
+            _ensure_users_role_constraint(conn)
         else:
             _init_db_duckdb(conn)
         _migrate_user_roles(conn)
