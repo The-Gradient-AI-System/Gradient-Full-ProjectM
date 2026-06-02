@@ -535,6 +535,263 @@ def _website_candidate_from_body(body: str) -> str | None:
     return m.group(0) if m else None
 
 
+def _first_nonempty(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if lowered in {"null", "none", "n/a", "unknown", "—", "-", "невідомо", "no company info"}:
+            continue
+        return text
+    return None
+
+
+def _dedupe_text(text: str | None) -> str | None:
+    if not text:
+        return None
+
+    normalized = re.sub(r"[ \t]+", " ", text.strip())
+    paragraphs = [part.strip() for part in re.split(r"\n{2,}", normalized) if part.strip()]
+    if len(paragraphs) > 1:
+        seen: set[str] = set()
+        unique: list[str] = []
+        for paragraph in paragraphs:
+            key = paragraph.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(paragraph)
+        if len(unique) < len(paragraphs):
+            return "\n\n".join(unique)
+
+    sentences = re.split(r"(?<=[.!?])\s+", normalized)
+    seen_sentences: set[str] = set()
+    unique_sentences: list[str] = []
+    for sentence in sentences:
+        key = sentence.strip().lower()
+        if not key or key in seen_sentences:
+            continue
+        seen_sentences.add(key)
+        unique_sentences.append(sentence.strip())
+    return " ".join(unique_sentences) if unique_sentences else normalized
+
+
+def _limit_sentences(text: str | None, max_sentences: int = 3) -> str | None:
+    if not text:
+        return None
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept = [sentence.strip() for sentence in sentences if sentence.strip()][:max_sentences]
+    return " ".join(kept) if kept else text.strip()
+
+
+def _sanitize_summary(text: str | None, max_sentences: int = 3) -> str | None:
+    return _limit_sentences(_dedupe_text(text), max_sentences)
+
+
+def _normalize_links(raw_links: Any, person_insights: list[dict[str, str]]) -> list[str]:
+    links: list[str] = []
+    seen: set[str] = set()
+
+    candidates = raw_links if isinstance(raw_links, list) else ([raw_links] if raw_links else [])
+    for item in candidates:
+        if not isinstance(item, str):
+            continue
+        url = item.strip()
+        if url and url not in seen:
+            seen.add(url)
+            links.append(url)
+
+    for item in person_insights:
+        url = (item.get("url") or "").strip()
+        if url and url not in seen:
+            seen.add(url)
+            links.append(url)
+
+    return links[:6]
+
+
+def _infer_role_from_search(person_insights: list[dict[str, str]]) -> str | None:
+    for item in person_insights:
+        title = (item.get("title") or "").strip()
+        if not title:
+            continue
+        if " linkedin" in title.lower():
+            title = re.sub(r"\s*\|\s*LinkedIn.*$", "", title, flags=re.IGNORECASE).strip()
+        lowered = title.lower()
+        if " - " in title and " at " in lowered:
+            role_part = title.split(" - ", 1)[1]
+            return role_part.split(" at ")[0].strip(" -|,")
+        if " at " in lowered:
+            return title.split(" at ")[0].strip(" -|,")
+        if " - " in title:
+            return title.split(" - ", 1)[1].strip()
+        if len(title.split()) <= 6:
+            return title
+    return None
+
+
+def _infer_location_from_search(person_insights: list[dict[str, str]]) -> str | None:
+    location_pattern = re.compile(
+        r"\b([A-Z][a-zA-Z\-]+(?:\s+[A-Z][a-zA-Z\-]+){0,2},\s*[A-Z][a-zA-Z\s\-]{2,})\b"
+    )
+    for item in person_insights:
+        for field in (item.get("snippet") or "", item.get("title") or ""):
+            match = location_pattern.search(field)
+            if match:
+                return match.group(1).strip()
+    return None
+
+
+def _infer_experience_from_search(person_insights: list[dict[str, str]]) -> str | None:
+    experience_pattern = re.compile(
+        r"(\d+\+?\s*(?:years|year|рок(?:ів|и)?)|senior|lead|head of|director|partner|vp|executive)",
+        flags=re.IGNORECASE,
+    )
+    for item in person_insights:
+        snippet = item.get("snippet") or ""
+        match = experience_pattern.search(snippet)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def _build_person_summary_fallback(data: dict[str, Any], person_insights: list[dict[str, str]]) -> str | None:
+    parts: list[str] = []
+    role = data.get("person_role")
+    if role:
+        parts.append(str(role))
+    company = data.get("company")
+    if company:
+        parts.append(f"у {company}")
+    location = data.get("person_location")
+    if location:
+        parts.append(f"({location})")
+    experience = data.get("person_experience")
+    if experience:
+        parts.append(f"— {experience}")
+
+    if parts:
+        return _sanitize_summary(" ".join(parts), max_sentences=2)
+
+    snippet = next((item.get("snippet") for item in person_insights if item.get("snippet")), None)
+    return _sanitize_summary(snippet, max_sentences=2)
+
+
+def _build_company_summary_fallback(
+    data: dict[str, Any],
+    company_insights: list[dict[str, str]],
+) -> str | None:
+    snippet = next((item.get("snippet") for item in company_insights if item.get("snippet")), None)
+    if snippet:
+        return _sanitize_summary(snippet, max_sentences=3)
+    company = data.get("company")
+    website = data.get("website")
+    if company and website:
+        return f"{company} — {website}"
+    return company
+
+
+def _finalize_lead_analysis(
+    data: dict[str, Any],
+    *,
+    sender: str,
+    company_candidate: str | None,
+    person_insights: list[dict[str, str]],
+    company_insights: list[dict[str, str]],
+) -> dict[str, Any]:
+    company = _first_nonempty(data.get("company"), company_candidate)
+    website = _normalize_website(_first_nonempty(data.get("website")))
+
+    person_role = _first_nonempty(
+        data.get("person_role"),
+        _infer_role_from_search(person_insights),
+    )
+    person_location = _first_nonempty(
+        data.get("person_location"),
+        _infer_location_from_search(person_insights),
+    )
+    person_experience = _first_nonempty(
+        data.get("person_experience"),
+        _infer_experience_from_search(person_insights),
+    )
+
+    person_links = _normalize_links(data.get("person_links"), person_insights)
+
+    person_summary = _sanitize_summary(
+        _first_nonempty(data.get("person_summary"), _build_person_summary_fallback(data, person_insights)),
+        max_sentences=3,
+    )
+    company_summary = _sanitize_summary(
+        _first_nonempty(
+            data.get("company_summary"),
+            _build_company_summary_fallback(data, company_insights),
+        ),
+        max_sentences=3,
+    )
+
+    full_name = _first_nonempty(data.get("full_name"))
+    if not full_name:
+        name_parts = [_first_nonempty(data.get("first_name")), _first_nonempty(data.get("last_name"))]
+        full_name = " ".join(part for part in name_parts if part) or None
+
+    return {
+        "email": _first_nonempty(data.get("email"), sender) or sender,
+        "first_name": data.get("first_name"),
+        "last_name": data.get("last_name"),
+        "full_name": full_name,
+        "company": company,
+        "company_summary": company_summary,
+        "order_number": data.get("order_number"),
+        "order_description": data.get("order_description"),
+        "amount": data.get("amount"),
+        "currency": data.get("currency"),
+        "phone_number": data.get("phone_number"),
+        "website": website,
+        "person_insights": person_insights,
+        "person_role": person_role,
+        "person_location": person_location,
+        "person_experience": person_experience,
+        "person_links": person_links,
+        "company_insights": company_insights,
+        "person_summary": person_summary,
+    }
+
+
+_EXTRACTION_SYSTEM_PROMPT = (
+    "You are a B2B lead intelligence assistant. Extract structured facts from inbound sales emails. "
+    "Use the sender email domain to infer a company ONLY when it is a corporate domain "
+    "(never for gmail.com, outlook.com, yahoo.com, icloud.com, proton.me). "
+    "Parse signatures for name, role, phone, company, and location. "
+    "Return ONLY valid JSON with keys: "
+    "email, first_name, last_name, full_name, company, company_summary, "
+    "order_number, order_description, amount, currency, "
+    "phone_number, website, person_role, person_location, person_experience, person_links, person_summary. "
+    "Use null only when a field is truly absent from the email."
+)
+
+_FINAL_SYSTEM_PROMPT = (
+    "You are a B2B lead intelligence assistant. Merge extracted email data with enrichment context "
+    "into a complete lead profile. "
+    "Write person_summary and company_summary in Ukrainian. "
+    "Rules:\n"
+    "- person_summary: 2-3 concise sentences about WHO the sender is (role, seniority, background, why they wrote). "
+    "Do NOT repeat sentences.\n"
+    "- company_summary: 2-3 concise sentences about WHAT the company is (industry, offer, scale, relevance). "
+    "Do NOT repeat sentences.\n"
+    "- person_role: job title; infer from signature, enrichment, or search snippets if missing.\n"
+    "- person_location: city/country/region when possible; infer from signature or search if missing.\n"
+    "- person_experience: short seniority phrase, e.g. '10+ років у enterprise IT' or 'Senior / Partner level'.\n"
+    "- company: canonical company name.\n"
+    "- website: normalized https URL when known.\n"
+    "- person_links: array of relevant URLs (LinkedIn, company site, profile pages).\n"
+    "- Fill every field with the best available evidence. Prefer enrichment over null.\n"
+    "Return ONLY valid JSON with the same keys as the extraction step."
+)
+
+
 def _normalize_website(url: str | None) -> str | None:
     if not url:
         return None
@@ -548,35 +805,7 @@ def _normalize_website(url: str | None) -> str | None:
 
 
 def analyze_email(subject: str, body: str, sender: str) -> Dict[str, Any]:
-    """Call OpenAI to extract structured fields from an email.
-
-    Expected JSON schema in the response:
-    {
-        "email": string | null,
-        "first_name": string | null,
-        "last_name": string | null,
-        "full_name": string | null,
-        "company": string | null,
-        "order_number": string | null,
-        "order_description": string | null,
-        
-    }
-    """
-
-    system_prompt = (
-        "You are an intelligent email parsing assistant. "
-        "Your goal involves two steps: "
-        "1) Extract structured data from the email. "
-        "2) If you identify a company name, call the tool 'search_company_tool' to get extra company details. "
-        "If no company name is explicitly present in the email text, you may infer a company from the sender email domain "
-        "(but do not infer companies for personal email providers like gmail.com). "
-        "Finally, return ONLY a valid JSON object with the exact keys: "
-        "email, first_name, last_name, full_name, company, company_summary, "
-        "order_number, order_description, amount, currency, "
-        "phone_number, website, person_role, person_location, person_experience, person_links, person_summary. "
-        "If some field is not present, set it to null. "
-        "If amount is present, use a number (dot as decimal separator)."
-    )
+    """Extract and enrich structured lead profile data from an inbound email."""
 
     company_candidate = _company_candidate_from_sender_email(sender)
     website_candidate = _website_candidate_from_body(body)
@@ -584,7 +813,6 @@ def analyze_email(subject: str, body: str, sender: str) -> Dict[str, Any]:
     company_insights_struct: list[dict[str, str]] = []
 
     if AI_DEBUG:
-        # Avoid logging full PII content (body, full sender). Keep only high-level signal.
         sender_domain = sender.split("@", 1)[1] if sender and "@" in sender else None
         print(
             f"[AI] analyze_email model={AI_MODEL} search_enabled={COMPANY_SEARCH_ENABLED} "
@@ -592,7 +820,7 @@ def analyze_email(subject: str, body: str, sender: str) -> Dict[str, Any]:
         )
 
     user_prompt = (
-        "Extract data from the following email.\n\n"
+        "Extract structured lead data from this inbound email.\n\n"
         f"Sender email: {sender}\n"
         f"Sender domain company candidate (may be null): {company_candidate}\n"
         f"Website URL found in body (may be null): {website_candidate}\n"
@@ -600,30 +828,27 @@ def analyze_email(subject: str, body: str, sender: str) -> Dict[str, Any]:
         "Body:\n" + body
     )
 
-    # Step 1: Always do deterministic extraction to JSON first.
-    base_messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
     base_response = client.chat.completions.create(
         model=AI_MODEL,
-        messages=base_messages,
+        messages=[
+            {"role": "system", "content": _EXTRACTION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
         response_format={"type": "json_object"},
     )
 
-    base_content = base_response.choices[0].message.content
     try:
-        base_data = json.loads(base_content)
+        base_data = json.loads(base_response.choices[0].message.content or "{}")
     except json.JSONDecodeError:
         base_data = {}
 
-    # Step 2: Always enrich ("search always") if enabled.
     enrichment_parts: list[str] = []
     person_enrichment: list[dict[str, str]] = []
     if COMPANY_SEARCH_ENABLED:
-        company_for_search = base_data.get("company") or company_candidate
-        website_for_fetch = _normalize_website(base_data.get("website") or website_candidate)
+        company_for_search = _first_nonempty(base_data.get("company"), company_candidate)
+        website_for_fetch = _normalize_website(
+            _first_nonempty(base_data.get("website"), website_candidate)
+        )
 
         if website_for_fetch:
             enrichment_parts.append("[WEBSITE]\n" + fetch_website_tool(website_for_fetch))
@@ -632,93 +857,46 @@ def analyze_email(subject: str, body: str, sender: str) -> Dict[str, Any]:
             enrichment_parts.append("[DDG_SEARCH]\n" + search_company_tool(company_for_search))
             company_insights_struct = _company_search_struct_cache.get(company_for_search, [])
 
-        person_name = base_data.get("full_name") or base_data.get("first_name")
+        person_name = _first_nonempty(base_data.get("full_name"), base_data.get("first_name"))
         if person_name:
             person_enrichment = search_person_insights(person_name, company_for_search)
             if person_enrichment:
                 formatted = "\n".join(
-                    f"{idx}. {item.get('title', 'Без заголовку')}\n   {item.get('snippet', '')}\n   {item.get('url', '')}"
+                    f"{idx}. {item.get('title', 'Без заголовку')}\n"
+                    f"   {item.get('snippet', '')}\n"
+                    f"   {item.get('url', '')}"
                     for idx, item in enumerate(person_enrichment, start=1)
                 )
                 enrichment_parts.append("[PERSON_SEARCH]\n" + formatted)
 
     enrichment_context = "\n\n".join(enrichment_parts) if enrichment_parts else ""
 
-    # Step 3: Final JSON generation using extracted + enriched context.
-    final_system_prompt = (
-        system_prompt
-        + " Use the enrichment context (if provided) to populate company_summary and website accurately."
-        + " If person search results are provided, populate role, experience level, social links when possible."
-    )
-
     final_user_prompt = (
-        "Here is the extracted JSON (may contain nulls):\n"
+        "Extracted JSON from the email:\n"
         + json.dumps(base_data, ensure_ascii=False)
-        + "\n\nEnrichment context (may be empty):\n"
+        + "\n\nEnrichment context (website, company search, person search):\n"
         + (enrichment_context or "<empty>")
-        + "\n\nNow output only the final JSON object with the required keys."
+        + "\n\nReturn the final complete lead profile JSON."
     )
 
     final_response = client.chat.completions.create(
         model=AI_MODEL,
         messages=[
-            {"role": "system", "content": final_system_prompt},
+            {"role": "system", "content": _FINAL_SYSTEM_PROMPT},
             {"role": "user", "content": final_user_prompt},
         ],
         response_format={"type": "json_object"},
     )
 
-    final_content = final_response.choices[0].message.content
     try:
-        data = json.loads(final_content)
+        data = json.loads(final_response.choices[0].message.content or "{}")
     except json.JSONDecodeError:
         data = {}
 
-    person_links = data.get("person_links") or []
-    if isinstance(person_links, str):
-        person_links = [person_links]
-
-    if not isinstance(person_links, list):
-        person_links = []
-
-    person_summary = data.get("person_summary")
-    if not person_summary:
-        summary_parts: list[str] = []
-        role = data.get("person_role")
-        if role:
-            summary_parts.append(f"Роль: {role}")
-        location = data.get("person_location")
-        if location:
-            summary_parts.append(f"Локація: {location}")
-        experience = data.get("person_experience")
-        if experience:
-            summary_parts.append(f"Досвід: {experience}")
-        if person_enrichment:
-            first_snippet = next((item.get("snippet") for item in person_enrichment if item.get("snippet")), None)
-            if first_snippet:
-                summary_parts.append(first_snippet)
-        person_summary = " | ".join(summary_parts) if summary_parts else None
-
-    result = {
-        "email": data.get("email") or sender,
-        "first_name": data.get("first_name"),
-        "last_name": data.get("last_name"),
-        "full_name": data.get("full_name"),
-        "company": data.get("company"),
-        "company_summary": data.get("company_summary"),
-        "order_number": data.get("order_number"),
-        "order_description": data.get("order_description"),
-        "amount": data.get("amount"),
-        "currency": data.get("currency"),
-        "phone_number": data.get("phone_number"),
-        "website": data.get("website"),
-        "person_insights": person_enrichment,
-        "person_role": data.get("person_role"),
-        "person_location": data.get("person_location"),
-        "person_experience": data.get("person_experience"),
-        "person_links": person_links,
-        "company_insights": company_insights_struct,
-        "person_summary": person_summary,
-    }
-
-    return result
+    return _finalize_lead_analysis(
+        data,
+        sender=sender,
+        company_candidate=company_candidate,
+        person_insights=person_enrichment,
+        company_insights=company_insights_struct,
+    )

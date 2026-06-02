@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styled, { useTheme } from 'styled-components';
-import { getGmailLeads, postGmailSync, postGenerateReplies, postLeadStatus, postLeadInsights, postEmailAction, sendEmailWithAttachments } from '../api/client';
+import { getGmailLeads, postGmailSync, postGenerateReplies, postLeadInsights, postEmailAction, sendEmailWithAttachments } from '../api/client';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -60,15 +60,36 @@ const parseJsonList = (value) => {
 
 const normalizeLeadInsights = (lead) => {
   if (!lead) return null;
+  const companySummary = lead.company_summary || lead.company_info || '';
+  const personSummary = lead.person_summary || '';
   return {
     ...lead,
     person_links: parseJsonList(lead.person_links),
     person_insights: parseJsonList(lead.person_insights),
     company_insights: parseJsonList(lead.company_insights),
-    company: lead.company || '',
+    company: lead.company || lead.company_name || '',
     website: lead.website || '',
-    company_summary: lead.company_summary || '',
+    company_summary: companySummary,
+    company_info: companySummary,
+    person_summary: personSummary,
+    phone_number: lead.phone_number || lead.phone || '',
+    person_role: lead.person_role || '',
+    person_location: lead.person_location || '',
+    person_experience: lead.person_experience || '',
   };
+};
+
+const isLeadProfileIncomplete = (lead) => {
+  if (!lead) return true;
+  const companyInfo = (lead.company_info || lead.company_summary || '').trim();
+  const hasWeakCompany = !companyInfo || companyInfo.toLowerCase() === 'no company info';
+  return (
+    !lead.person_summary?.trim() ||
+    hasWeakCompany ||
+    !lead.person_role?.trim() ||
+    !lead.person_location?.trim() ||
+    !lead.person_experience?.trim()
+  );
 };
 
 const useLeadData = (snapshot, updateSnapshot) => {
@@ -1492,6 +1513,20 @@ const SummaryLabel = styled.span`
 
 
 
+const SummarySubLabel = styled.strong`
+
+  display: block;
+
+  margin-bottom: 0.35rem;
+
+  font-size: 0.82rem;
+
+  color: ${({ theme }) => theme.colors.primary};
+
+`;
+
+
+
 const SummaryText = styled.p`
 
   margin: 0;
@@ -1557,16 +1592,6 @@ const BadgeColumn = styled.div`
   gap: 0.35rem;
 
   align-items: flex-start;
-
-`;
-
-
-
-const DecisionNote = styled.span`
-
-  font-size: 0.82rem;
-
-  color: ${({ theme }) => theme.colors.subtleText};
 
 `;
 
@@ -2587,24 +2612,6 @@ const ReplyStatusMessage = styled.p`
 
 
 
-const DECISION_LABELS = {
-
-  confirmed: 'Підтверджено',
-
-  rejected: 'Відхилено',
-
-  snoozed: 'Відкладено',
-
-  postponed: 'Відкладено',
-
-  in_work: 'В роботі',
-
-  restored: 'Відновлено',
-
-};
-
-
-
 const DECISION_ROW_TONES = {
 
   confirmed: 'rgba(31, 226, 155, 0.12)',
@@ -2654,8 +2661,6 @@ const Automation = () => {
   const rangeRef = useRef(null);
 
   const [selectedLead, setSelectedLead] = useState(null);
-
-  const [decisions, setDecisions] = useState({});
 
   const [insightsError, setInsightsError] = useState(null);
 
@@ -2733,8 +2738,7 @@ const Automation = () => {
     setReplyStyle('semi_official');
 
     try {
-      const needsEnrichment = !lead?.full_name && !lead?.company_info && !lead?.person_summary;
-      if (!needsEnrichment) return;
+      if (!isLeadProfileIncomplete(lead)) return;
 
       const enriched = await postLeadInsights({
         sender: lead.email || 'unknown@example.com',
@@ -2742,7 +2746,7 @@ const Automation = () => {
         body: lead.body || '',
       });
       if (enriched) {
-        setSelectedLead((prev) => ({ ...(prev || lead), ...enriched }));
+        setSelectedLead((prev) => normalizeLeadInsights({ ...(prev || lead), ...enriched }));
       }
     } catch (err) {
       setInsightsError(err?.message || 'Не вдалося завантажити інсайти.');
@@ -2790,8 +2794,7 @@ const Automation = () => {
 
       const qualified = isQualifiedLead(lead);
 
-      const decisionStatus = decisions[getLeadKey(lead)]?.status;
-      const status = normalizeEmailStatus(decisionStatus ?? getLeadStatus(lead));
+      const status = normalizeEmailStatus(getLeadStatus(lead));
       const badgeVariantForFilter =
         status === 'call_lead'
           ? 'call_lead'
@@ -2845,7 +2848,7 @@ const Automation = () => {
 
     });
 
-  }, [visibleLeads, stageFilter, searchTerm, rangeFilter, decisions]);
+  }, [visibleLeads, stageFilter, searchTerm, rangeFilter]);
 
 
 
@@ -2883,9 +2886,7 @@ const Automation = () => {
 
     visibleLeads.forEach((lead) => {
 
-      const decisionStatus = decisions[getLeadKey(lead)]?.status;
-
-      const status = (decisionStatus ?? getLeadStatus(lead) ?? '').toLowerCase();
+      const status = (getLeadStatus(lead) ?? '').toLowerCase();
 
 
 
@@ -2941,7 +2942,7 @@ const Automation = () => {
 
     };
 
-  }, [visibleLeads, decisions]);
+  }, [visibleLeads]);
 
 
 
@@ -3262,83 +3263,6 @@ const Automation = () => {
       .then(() => refresh({ isManualRefresh: true }))
       .catch((err) => console.warn('Gmail sync failed:', err));
   }, [refresh]);
-
-  const handleDecisionWithReason = useCallback(
-    async (status, rejectionReason) => {
-      if (!selectedLead) return;
-
-      const gmailId = selectedLead.gmail_id || selectedLead.gmailId;
-      const rowNumber = selectedLead.sheet_row || selectedLead.sheetRow;
-      if (!gmailId && !rowNumber) {
-        setStatusError('Не знайдено ідентифікатор ліда для збереження статусу.');
-        return;
-      }
-
-      let targetStatus = status;
-
-      const decidedAt = new Date().toISOString();
-      setDecisions((prev) => ({
-        ...prev,
-        [getLeadKey(selectedLead)]: {
-          status: targetStatus,
-          decidedAt,
-          rejectionReason,
-        },
-      }));
-      setStatusError(null);
-
-      if (targetStatus !== 'in_work' && targetStatus !== 'postponed') {
-        closeLocalModal();
-      }
-
-      try {
-        let response;
-        if (gmailId) {
-          response = await postLeadStatus({ 
-            gmail_id: gmailId, 
-            status: targetStatus,
-            rejection_reason: rejectionReason 
-          });
-        } else {
-          response = await postLeadStatus({ 
-            row_number: rowNumber, 
-            status: targetStatus,
-            rejection_reason: rejectionReason 
-          });
-        }
-        
-        // Update local selected lead status so UI updates immediately
-        const finalStatusFromServer = response?.status || targetStatus;
-        setSelectedLead(prev => prev ? { ...prev, status: finalStatusFromServer } : null);
-
-        await refresh({ isManualRefresh: true });
-
-        if (targetStatus === 'postponed') {
-          closeLocalModal();
-          setSelectedLead(null);
-          setShowReader(false);
-          navigate('/work-zone', { replace: true });
-        }
-
-        pushNotification({
-          variant: 'success',
-          title: 'Статус оновлено',
-          message: `Статус змінено на "${BADGE_LABELS[targetStatus] || targetStatus}"${rejectionReason ? ` з причиною: ${rejectionReason}` : ''}`,
-        });
-      } catch (error) {
-        setDecisions((prev) => {
-          const key = getLeadKey(selectedLead);
-          const updated = { ...prev };
-          delete updated[key];
-          return updated;
-        });
-        setStatusError(error instanceof Error ? error.message : 'Не вдалося оновити статус.');
-      }
-    },
-    [selectedLead, refresh, pushNotification, closeLocalModal, navigate]
-  );
-
-  const handleDecision = useCallback((status) => handleDecisionWithReason(status, null), [handleDecisionWithReason]);
 
   const handleEmailAction = useCallback(
     async (action) => {
@@ -3772,11 +3696,7 @@ const Automation = () => {
 
                 {filteredLeads.map((lead, index) => {
 
-                  const qualified = isQualifiedLead(lead);
-
                   const key = getLeadKey(lead);
-
-                  const decision = decisions[key];
 
                   const leadStatus = getLeadStatus(lead);
 
@@ -3875,16 +3795,6 @@ const Automation = () => {
                               Дію виконав: <ActionByUsername>{lead.last_action_by}</ActionByUsername>
                             </ActionByBadge>
                           )}
-                          {decision && (
-
-                            <DecisionNote>
-
-                              {`Рішення: ${DECISION_LABELS[decision.status]} • ${formatRelative(decision.decidedAt)}`}
-
-                            </DecisionNote>
-
-                          )}
-
                         </BadgeColumn>
 
                       </td>
@@ -4043,7 +3953,7 @@ const Automation = () => {
 
                                 <InfoLabel>Роль</InfoLabel>
 
-                                <InfoValue>{selectedInsights?.person_role || selectedPerson?.snippet || 'Потребує уточнення'}</InfoValue>
+                                <InfoValue>{selectedInsights?.person_role || selectedPerson?.snippet || '—'}</InfoValue>
 
                               </InfoRow>
 
@@ -4086,13 +3996,25 @@ const Automation = () => {
                               <SummaryLabel>Коротко</SummaryLabel>
 
                               {selectedInsights?.person_summary ? (
-
-                                <SummaryText>{selectedInsights.person_summary}</SummaryText>
-
+                                <>
+                                  <SummarySubLabel>Про контакт</SummarySubLabel>
+                                  <SummaryText>{selectedInsights.person_summary}</SummaryText>
+                                </>
                               ) : (
+                                <SummaryHint>Немає зведеної інформації про контакт</SummaryHint>
+                              )}
 
-                                <SummaryHint>Немає зведеної інформації</SummaryHint>
-
+                              {(selectedInsights?.company_summary || selectedCompanySummary) ? (
+                                <>
+                                  <SummarySubLabel style={{ marginTop: '0.85rem' }}>Про компанію</SummarySubLabel>
+                                  <SummaryText>
+                                    {selectedInsights?.company_summary || selectedCompanySummary}
+                                  </SummaryText>
+                                </>
+                              ) : (
+                                <SummaryHint style={{ marginTop: '0.85rem' }}>
+                                  Немає зведеної інформації про компанію
+                                </SummaryHint>
                               )}
 
                             </SummaryBlock>
@@ -4177,37 +4099,7 @@ const Automation = () => {
 
                               </InfoRow>
 
-                              <InfoRow>
-
-                                <InfoLabel>Підсумок</InfoLabel>
-
-                                <InfoValue>{selectedInsights?.company_summary || 'Дані не знайдено.'}</InfoValue>
-
-                              </InfoRow>
-
                             </InfoGrid>
-
-                            {(selectedInsights?.company_summary || selectedCompanySummary) && (
-
-                              <SummaryBlock>
-
-                                <SummaryLabel>Коротко про компанію</SummaryLabel>
-
-                                {selectedInsights?.company_summary ? (
-
-                                  <SummaryText>{selectedInsights.company_summary}</SummaryText>
-
-                                ) : null}
-
-                                {selectedCompanySummary && (
-
-                                  <SummaryHint>{selectedCompanySummary}</SummaryHint>
-
-                                )}
-
-                              </SummaryBlock>
-
-                            )}
 
                             {!!selectedCompanyInsights.length && (
 
