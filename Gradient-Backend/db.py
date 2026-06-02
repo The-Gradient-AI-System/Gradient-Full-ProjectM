@@ -207,6 +207,45 @@ def _ensure_users_role_constraint(conn) -> None:
     if not USE_POSTGRES:
         return
     conn.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check")
+
+    invalid = conn.execute(
+        """
+        SELECT id, username, role
+        FROM users
+        WHERE role IS NULL
+           OR TRIM(role) = ''
+           OR LOWER(TRIM(role)) NOT IN ('owner', 'admin', 'manager')
+        """
+    ).fetchall()
+    if invalid:
+        for row in invalid:
+            logger.warning(
+                "Normalizing invalid user role id=%s username=%s role=%r -> manager",
+                row[0],
+                row[1],
+                row[2],
+            )
+        print(
+            f"[db] Normalizing {len(invalid)} user(s) with invalid role to 'manager'"
+        )
+
+    conn.execute(
+        """
+        UPDATE users
+        SET role = LOWER(TRIM(role))
+        WHERE role IS NOT NULL AND TRIM(role) <> ''
+        """
+    )
+    conn.execute(
+        """
+        UPDATE users
+        SET role = 'manager'
+        WHERE role IS NULL
+           OR TRIM(role) = ''
+           OR role NOT IN ('owner', 'admin', 'manager')
+        """
+    )
+
     conn.execute(
         """
         ALTER TABLE users ADD CONSTRAINT users_role_check

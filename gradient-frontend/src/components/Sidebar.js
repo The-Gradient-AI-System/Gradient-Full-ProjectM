@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { FiUser } from 'react-icons/fi';
 import { getManagersStatus, resolveAvatarUrl } from '../api/client';
@@ -123,13 +123,16 @@ const Sidebar = () => {
   const canViewStatus = canViewStaffOnlineStatus(user?.role);
   const currentUserId = user?.id;
 
-  const excludeSelfFromManagers = (list) => {
-    if (!isAdmin(user?.role) || currentUserId == null) {
-      return list;
-    }
-    const selfId = Number(currentUserId);
-    return list.filter((m) => Number(m.id) !== selfId);
-  };
+  const excludeSelfFromManagers = useCallback(
+    (list) => {
+      if (!isAdmin(user?.role) || currentUserId == null) {
+        return list;
+      }
+      const selfId = Number(currentUserId);
+      return list.filter((m) => Number(m.id) !== selfId);
+    },
+    [user?.role, currentUserId]
+  );
 
   useEffect(() => {
     if (!canViewStatus) return;
@@ -164,7 +167,7 @@ const Sidebar = () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [canViewStatus, currentUserId, user?.role]);
+  }, [canViewStatus, currentUserId, user?.role, excludeSelfFromManagers]);
 
   const preparedManagers = useMemo(
     () =>
