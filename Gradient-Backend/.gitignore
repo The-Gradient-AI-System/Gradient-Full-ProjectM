@@ -46,5 +46,9 @@ credentials/
 token.json
 credentials.json
 
+# User-uploaded avatars (folder kept via .gitkeep)
+static/avatars/**
+!static/avatars/.gitkeep
+
 # Misc
 notes.txt

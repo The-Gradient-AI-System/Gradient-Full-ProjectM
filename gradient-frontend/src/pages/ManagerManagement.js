@@ -7,7 +7,15 @@ import {
   deleteManager,
   getManagers,
   setManagerStatus,
+  updateManagerRole,
 } from '../api/client';
+import {
+  ROLE_ADMIN,
+  ROLE_MANAGER,
+  canManageManagers,
+  isOwner,
+  staffRoleLabel,
+} from '../utils/roles';
 
 const PageWrapper = styled.section`
   width: 100%;
@@ -124,7 +132,7 @@ const List = styled.div`
 
 const ListItem = styled.div`
   display: grid;
-  grid-template-columns: 48px 1fr auto;
+  grid-template-columns: 48px 1fr auto auto;
   gap: 1rem;
   align-items: center;
 `;
@@ -188,6 +196,37 @@ const Actions = styled.div`
   }
 `;
 
+const ROLE_SELECT_COLOR = '#0c28c7';
+
+const RoleSelect = styled.select`
+  min-width: 148px;
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  background: ${({ theme }) => (theme.mode === 'light' ? '#f8fbff' : 'rgba(12, 17, 34, 0.88)')};
+  color: ${ROLE_SELECT_COLOR};
+  font-size: 0.86rem;
+  font-weight: 500;
+  cursor: pointer;
+
+  &:focus {
+    outline: none;
+    border-color: rgba(104, 125, 255, 0.85);
+    box-shadow: 0 0 0 2px rgba(104, 125, 255, 0.2);
+  }
+
+  &:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+    color: ${ROLE_SELECT_COLOR};
+  }
+
+  option {
+    color: ${ROLE_SELECT_COLOR};
+    font-weight: 500;
+  }
+`;
+
 const Banner = styled.p`
   margin: 0;
   font-size: 0.92rem;
@@ -204,8 +243,10 @@ const ManagerManagement = () => {
   const [managersLoading, setManagersLoading] = useState(false);
   const [managers, setManagers] = useState([]);
   const [message, setMessage] = useState(null);
+  const [roleUpdatingId, setRoleUpdatingId] = useState(null);
 
-  const isAdmin = user?.role === 'admin';
+  const canAccessPage = canManageManagers(user?.role);
+  const isOwnerUser = isOwner(user?.role);
 
   const avatarText = useMemo(() => {
     const name = (value) => (value || '').trim();
@@ -233,9 +274,9 @@ const ManagerManagement = () => {
   };
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canAccessPage) return;
     loadManagers();
-  }, [isAdmin]);
+  }, [canAccessPage]);
 
   const handleChange = (field) => (event) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }));
@@ -267,38 +308,62 @@ const ManagerManagement = () => {
     }
   };
 
-  const handleDelete = async (manager) => {
-    const managerUsername = manager?.username || '';
-    const managerLabel = managerUsername || manager?.email || '';
-    const ok = window.confirm(`Видалити менеджера ${managerLabel}?`);
+  const handleRoleChange = async (manager, nextRole) => {
+    if (!isOwnerUser || manager.role === nextRole) return;
+
+    const previousRole = manager.role;
+    setMessage(null);
+    setRoleUpdatingId(manager.id);
+    setManagers((prev) =>
+      prev.map((item) => (item.id === manager.id ? { ...item, role: nextRole } : item))
+    );
+
+    try {
+      await updateManagerRole(manager.id, nextRole);
+      setMessage('Роль оновлено.');
+    } catch (error) {
+      setManagers((prev) =>
+        prev.map((item) => (item.id === manager.id ? { ...item, role: previousRole } : item))
+      );
+      setMessage(error?.message || 'Не вдалося змінити роль.');
+    } finally {
+      setRoleUpdatingId(null);
+    }
+  };
+
+  const handleDelete = async (staff) => {
+    const staffUsername = staff?.username || '';
+    const staffLabel = staffUsername || staff?.email || '';
+    const roleLabel = staffRoleLabel(staff?.role);
+    const ok = window.confirm(`Видалити ${roleLabel.toLowerCase()} ${staffLabel}?`);
     if (!ok) return;
 
     const confirmation = window.prompt(
-      `Щоб підтвердити видалення, введіть username: ${managerUsername}`
+      `Щоб підтвердити видалення, введіть username: ${staffUsername}`
     );
     if (confirmation === null) return;
 
-    if ((confirmation || '').trim() !== managerUsername) {
+    if ((confirmation || '').trim() !== staffUsername) {
       setMessage('Username введено невірно. Видалення скасовано.');
       return;
     }
 
     setMessage(null);
     try {
-      await deleteManager(manager.id, managerUsername);
-      setMessage('Менеджера видалено.');
+      await deleteManager(staff.id, staffUsername);
+      setMessage('Обліковий запис видалено.');
       await loadManagers();
     } catch (error) {
       setMessage(error?.message || 'Не вдалося видалити менеджера.');
     }
   };
 
-  if (!isAdmin) {
+  if (!canAccessPage) {
     return (
       <PageWrapper>
         <Panel style={{ width: 'min(720px, 100%)' }}>
           <PanelTitle>Керування менеджерами</PanelTitle>
-          <Banner $error>Доступ дозволено лише адміністратору.</Banner>
+          <Banner $error>Доступ дозволено лише власнику або адміністратору.</Banner>
         </Panel>
       </PageWrapper>
     );
@@ -368,7 +433,7 @@ const ManagerManagement = () => {
         </Panel>
 
         <Panel>
-          <PanelTitle>Працівники</PanelTitle>
+          <PanelTitle>{isOwnerUser ? 'Менеджери та адміністратори' : 'Працівники'}</PanelTitle>
 
           {message && <Banner $error={String(message).toLowerCase().includes('не вдалося')}>{message}</Banner>}
 
@@ -382,7 +447,22 @@ const ManagerManagement = () => {
                   <EmployeeInfo>
                     <h4>{manager.username || manager.email}</h4>
                     <span>{manager.email}</span>
+                    <span>{staffRoleLabel(manager.role)}</span>
                   </EmployeeInfo>
+                  <RoleSelect
+                    value={manager.role === ROLE_ADMIN ? ROLE_ADMIN : ROLE_MANAGER}
+                    disabled={!isOwnerUser || roleUpdatingId === manager.id}
+                    onChange={(event) => handleRoleChange(manager, event.target.value)}
+                    aria-label={`Роль користувача ${manager.username || manager.email}`}
+                    style={{ color: ROLE_SELECT_COLOR }}
+                  >
+                    <option value={ROLE_MANAGER} style={{ color: ROLE_SELECT_COLOR }}>
+                      {staffRoleLabel(ROLE_MANAGER)}
+                    </option>
+                    <option value={ROLE_ADMIN} style={{ color: ROLE_SELECT_COLOR }}>
+                      {staffRoleLabel(ROLE_ADMIN)}
+                    </option>
+                  </RoleSelect>
                   <Actions>
                     <button type="button" onClick={() => handleToggleActive(manager)}>
                       {manager.is_active ? 'Деактивувати' : 'Активувати'}
@@ -395,7 +475,7 @@ const ManagerManagement = () => {
               ))}
             </List>
           ) : (
-            <Banner>Менеджерів ще немає.</Banner>
+            <Banner>Список порожній.</Banner>
           )}
 
           <div style={{ display: 'flex', justifyContent: 'center' }}>

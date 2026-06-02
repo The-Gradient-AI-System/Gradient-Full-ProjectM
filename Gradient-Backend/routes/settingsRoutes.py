@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from service.settingsService import get_reply_settings, update_reply_settings
 from service.leadService import get_current_user_role
+from service.rbac import assert_owner, assert_owner_prompt_edit
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 security = HTTPBearer()
@@ -30,12 +31,17 @@ class ReplySettingsPayload(BaseModel):
 
 @router.get("/reply-prompts")
 def read_reply_prompts(user_info: dict = Depends(get_user_from_token)) -> ReplySettingsPayload:
+    assert_owner(user_info)
     settings = get_reply_settings()
     return ReplySettingsPayload(**settings)
 
 
 @router.put("/reply-prompts")
-def write_reply_prompts(payload: ReplySettingsPayload, user_info: dict = Depends(get_user_from_token)) -> ReplySettingsPayload:
+def write_reply_prompts(
+    payload: ReplySettingsPayload,
+    user_info: dict = Depends(get_user_from_token),
+) -> ReplySettingsPayload:
+    assert_owner_prompt_edit(user_info)
     updated = update_reply_settings(
         top_block=payload.topBlock,
         bottom_block=payload.bottomBlock,

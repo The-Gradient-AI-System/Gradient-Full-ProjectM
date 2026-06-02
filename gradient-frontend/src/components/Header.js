@@ -10,6 +10,7 @@ import ThemeToggle from './ThemeToggle';
 
 import { useAuth } from '../context/AuthContext';
 import { resolveAvatarUrl } from '../api/client';
+import { canAccessSettings, canManageManagers, roleDisplayLabel } from '../utils/roles';
 
 
 
@@ -519,7 +520,7 @@ const Header = () => {
 
                 <h4>{user?.username || user?.email || 'User'}</h4>
 
-                <span>{user?.role === 'admin' ? 'Адміністратор' : 'Менеджер'}</span>
+                <span>{roleDisplayLabel(user?.role) || 'Користувач'}</span>
 
               </UserTopInfo>
 
@@ -551,7 +552,7 @@ const Header = () => {
 
               </MenuItem>
 
-              {user?.role === 'admin' && (
+              {canAccessSettings(user?.role) && (
 
                 <MenuItem>
 
@@ -567,7 +568,7 @@ const Header = () => {
 
               )}
 
-              {user?.role === 'admin' && (
+              {canManageManagers(user?.role) && (
 
                 <MenuItem>
 

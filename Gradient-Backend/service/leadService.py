@@ -11,6 +11,21 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
 
+def redact_last_action_by_for_manager(item: dict, role: str | None) -> dict:
+    """Managers must not see who performed the last action on a lead/email."""
+    if role == "manager":
+        item["last_action_by"] = None
+    return item
+
+
+def redact_leads_last_action_by(leads: list[dict], role: str | None) -> list[dict]:
+    if role != "manager":
+        return leads
+    for lead in leads:
+        redact_last_action_by_for_manager(lead, role)
+    return leads
+
+
 def get_current_user_role(token: str, *, update_activity: bool = True) -> dict:
     """Extract user info from JWT token."""
     try:
@@ -42,7 +57,7 @@ def get_current_user_role(token: str, *, update_activity: bool = True) -> dict:
 
         user_info = {"id": user[0], "username": user[1], "role": user[2]}
 
-        if update_activity and user_info["role"] == "manager":
+        if update_activity and user_info["role"] in ("manager", "admin"):
             update_user_last_seen(user_info["id"])
 
         return user_info
@@ -117,7 +132,7 @@ def get_user_leads(user_info: dict, limit: int = 120):
     user_id = user_info.get("id")
 
     with get_conn() as conn:
-        if user_role == "admin":
+        if user_role in ("admin", "owner"):
             query = """
                 SELECT
                     gm.gmail_id, gm.status, gm.first_name, gm.last_name, gm.full_name, gm.email, gm.subject,
@@ -133,13 +148,15 @@ def get_user_leads(user_info: dict, limit: int = 120):
             leads = conn.execute(query, [limit]).fetchall()
 
         elif user_role == "manager":
+            from service.sheetService import _MY_IN_WORK_WHERE, _VISIBLE_TO_MANAGER_WHERE
+
             my_in_work = conn.execute(
-                "SELECT gmail_id FROM gmail_messages WHERE assigned_to = ? AND UPPER(status) = 'IN_WORK'",
-                [user_id],
+                f"SELECT 1 FROM gmail_messages gm WHERE {_MY_IN_WORK_WHERE} LIMIT 1",
+                [user_id, user_id],
             ).fetchone()
 
             if my_in_work:
-                query = """
+                query = f"""
                     SELECT
                         gm.gmail_id, gm.status, gm.first_name, gm.last_name, gm.full_name, gm.email, gm.subject,
                         gm.received_at, gm.company, gm.body, gm.phone, gm.website, gm.company_name, gm.company_info,
@@ -148,11 +165,12 @@ def get_user_leads(user_info: dict, limit: int = 120):
                         u.username as assigned_username, u.role as assigned_role
                     FROM gmail_messages gm
                     LEFT JOIN users u ON gm.assigned_to = u.id
-                    WHERE gm.gmail_id = ?
+                    WHERE {_MY_IN_WORK_WHERE}
+                    ORDER BY gm.created_at DESC
                 """
-                leads = conn.execute(query, [my_in_work[0]]).fetchall()
+                leads = conn.execute(query, [user_id, user_id]).fetchall()
             else:
-                query = """
+                query = f"""
                     SELECT
                         gm.gmail_id, gm.status, gm.first_name, gm.last_name, gm.full_name, gm.email, gm.subject,
                         gm.received_at, gm.company, gm.body, gm.phone, gm.website, gm.company_name, gm.company_info,
@@ -161,13 +179,11 @@ def get_user_leads(user_info: dict, limit: int = 120):
                         u.username as assigned_username, u.role as assigned_role
                     FROM gmail_messages gm
                     LEFT JOIN users u ON gm.assigned_to = u.id
-                    WHERE gm.status IS NULL
-                       OR UPPER(gm.status) != 'IN_WORK'
-                       OR gm.assigned_to = ?
+                    WHERE {_VISIBLE_TO_MANAGER_WHERE}
                     ORDER BY gm.created_at DESC
                     LIMIT ?
                 """
-                leads = conn.execute(query, [user_id, limit]).fetchall()
+                leads = conn.execute(query, [user_id, user_id, limit]).fetchall()
         else:
             return []
 

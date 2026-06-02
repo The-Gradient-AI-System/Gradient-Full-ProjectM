@@ -8,7 +8,7 @@ from service.syncService import sync_gmail_to_sheets
 from service.sheetService import build_leads_payload, build_leads_payload_from_db, update_lead_status, update_lead_status_gmail_id
 from service.aiService import analyze_email, generate_email_replies
 from service.settingsService import get_reply_prompts
-from service.leadService import get_current_user_role
+from service.leadService import get_current_user_role, redact_leads_last_action_by
 
 router = APIRouter(prefix="/gmail", tags=["Gmail"])
 security = HTTPBearer()
@@ -44,6 +44,11 @@ def get_leads(
         else:
             # Fallback to original sheet-based approach
             payload = build_leads_payload(limit)
+        if user_info:
+            payload["leads"] = redact_leads_last_action_by(
+                payload.get("leads", []),
+                user_info.get("role"),
+            )
         print(f"[DEBUG] Returning payload with {len(payload.get('leads', []))} leads, stats: {payload.get('stats')}")
         return payload
     except Exception as e:

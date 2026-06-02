@@ -109,11 +109,10 @@ const useLeadData = (snapshot, updateSnapshot) => {
     }
   }, [updateSnapshot]);
 
+  // Завжди тягнемо актуальний список з бекенду (менеджер може бачити лише закріплений лист).
   useEffect(() => {
-    if (!snapshot) {
-      refresh();
-    }
-  }, [snapshot, refresh]);
+    refresh();
+  }, [refresh]);
 
   return { data: snapshot, loading, error, refresh };
 };
@@ -821,6 +820,12 @@ const getStatusBadgeVariant = (status) => {
 
 const getAssignedManagerId = (lead) =>
   lead?.assigned_manager_id ?? lead?.assignedManagerId ?? lead?.assigned_to ?? null;
+
+const IN_WORK_RELEASE_ACTIONS = new Set(['confirm', 'postpone', 'reject']);
+
+const releasesManagerFromInWorkLock = (lead, action) =>
+  IN_WORK_RELEASE_ACTIONS.has(action) &&
+  normalizeEmailStatus(getLeadStatus(lead)) === 'in_work';
 
 const STATUS_TOOLTIPS = {
   confirmed: 'Клієнт підтверджений',
@@ -2643,6 +2648,7 @@ const Automation = () => {
   const location = useLocation();
 
   const { leadSnapshot, updateLeadSnapshot, pushNotification, user } = useAuth();
+  const canSeeLastActionBy = ['owner', 'admin'].includes(user?.role);
 
   const { data, loading, error, refresh } = useLeadData(leadSnapshot, updateLeadSnapshot);
 
@@ -3278,11 +3284,12 @@ const Automation = () => {
       setActionLoading(true);
 
       try {
+        const releasingInWorkLock = releasesManagerFromInWorkLock(selectedLead, action);
         const updated = await postEmailAction(msgId, action);
         const mergedLead = { ...selectedLead, ...updated };
         setSelectedLead(mergedLead);
 
-        if (data?.leads) {
+        if (!releasingInWorkLock && data?.leads) {
           updateLeadSnapshot(
             {
               ...data,
@@ -3296,10 +3303,12 @@ const Automation = () => {
 
         await refresh({ isManualRefresh: true });
 
+        if (releasingInWorkLock && action === 'reject') {
+          closeLocalModal();
+        }
+
         if (action === 'postpone') {
           closeLocalModal();
-          setSelectedLead(null);
-          setShowReader(false);
           navigate('/work-zone', { replace: true });
         }
 
@@ -3790,7 +3799,7 @@ const Automation = () => {
                           >
                             {badgeLabel}
                           </StatusBadge>
-                          {lead.last_action_by && (
+                          {canSeeLastActionBy && lead.last_action_by && (
                             <ActionByBadge>
                               Дію виконав: <ActionByUsername>{lead.last_action_by}</ActionByUsername>
                             </ActionByBadge>
@@ -3839,7 +3848,7 @@ const Automation = () => {
                   </StatusBadge>
                 </ModalTitleRow>
 
-                {selectedLead.last_action_by && (
+                {canSeeLastActionBy && selectedLead.last_action_by && (
                   <ActionByBadge>
                     Дію виконав: <ActionByUsername>{selectedLead.last_action_by}</ActionByUsername>
                   </ActionByBadge>

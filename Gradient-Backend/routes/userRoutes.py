@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Security, UploadFile
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -6,6 +7,12 @@ from pydantic import BaseModel, EmailStr
 
 from db import db_lock, get_conn
 from service.leadService import get_current_user_role
+from service.rbac import (
+    assert_owner,
+    assert_owner_or_admin,
+    assert_staff,
+    status_bar_exclude_user_id,
+)
 from service.userService import (
     get_managers_with_online_status,
     login_user,
@@ -49,8 +56,7 @@ class User(BaseModel):
 
 @router.post("/register")
 def register(user: User, user_info: dict = Depends(get_user_from_token)):
-    if user_info.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can register new users")
+    assert_staff(user_info)
     return register_user(user)
 
 
@@ -61,14 +67,79 @@ def login(user: User):
 
 @router.post("/logout")
 def logout(user_info: dict = Depends(get_user_from_token_no_activity)):
-    if user_info.get("role") == "manager":
+    if user_info.get("role") in ("manager", "admin"):
         mark_user_offline(user_info["id"])
     return {"msg": "Logged out successfully"}
 
 
 @users_router.get("/managers/status")
-def get_managers_status(_: dict = Depends(get_user_from_token)):
-    return {"managers": get_managers_with_online_status()}
+def get_managers_status(current_user: dict = Depends(get_user_from_token)):
+    """Team online status for owner/admin sidebar.
+
+    - owner: all managers and admins.
+    - admin: all managers and other admins (self excluded).
+    """
+    assert_owner_or_admin(current_user)
+    exclude_id = status_bar_exclude_user_id(current_user)
+    return {"managers": get_managers_with_online_status(exclude_user_id=exclude_id)}
+
+
+class UserRolePayload(BaseModel):
+    role: Literal["manager", "admin"]
+
+
+def _set_user_role(user_id: int, new_role: str) -> dict:
+    with db_lock:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT id, role FROM users WHERE id = ?",
+                [user_id],
+            ).fetchone()
+
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            current_role = row[1]
+            if current_role == "owner":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Неможливо змінити роль власника",
+                )
+
+            if current_role not in ("manager", "admin"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Роль цього користувача не можна змінити",
+                )
+
+            if current_role == new_role:
+                return {"id": user_id, "role": new_role}
+
+            conn.execute(
+                "UPDATE users SET role = ? WHERE id = ?",
+                [new_role, user_id],
+            )
+            conn.commit()
+
+    return {"id": user_id, "role": new_role}
+
+
+@users_router.post("/{user_id}/role")
+def set_user_role(
+    user_id: int,
+    payload: UserRolePayload,
+    current_user: dict = Depends(get_user_from_token),
+):
+    """Promote manager to admin or demote admin back to manager. Owner only."""
+    assert_owner(current_user)
+    return _set_user_role(user_id, payload.role)
+
+
+@users_router.post("/{user_id}/assign-admin")
+def assign_admin(user_id: int, current_user: dict = Depends(get_user_from_token)):
+    """Promote a user to admin. Only the owner may call this endpoint."""
+    assert_owner(current_user)
+    return _set_user_role(user_id, "admin")
 
 
 def _resolve_avatar_extension(file: UploadFile) -> str:

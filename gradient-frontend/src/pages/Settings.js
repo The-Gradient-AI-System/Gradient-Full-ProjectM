@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { FiRefreshCcw, FiSave } from 'react-icons/fi';
+import { Navigate } from 'react-router-dom';
 import { getReplyPrompts, updateReplyPrompts } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import { canAccessSettings, canEditPrompts } from '../utils/roles';
 
 const PageWrapper = styled.section`
   width: 100%;
@@ -132,7 +135,19 @@ const StatusMessage = styled.p`
   color: ${({ $error, theme }) => ($error ? '#ff4d4f' : theme.colors.textSecondary)};
 `;
 
+const PromptRestrictedNotice = styled.p`
+  margin: 0;
+  padding: 1.25rem 1.5rem;
+  border-radius: 18px;
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  background: ${({ theme }) => (theme.mode === 'light' ? '#f8fbff' : 'rgba(12, 17, 34, 0.88)')};
+  color: ${({ theme }) => theme.colors.textSecondary};
+  font-size: 1rem;
+  line-height: 1.6;
+`;
+
 const Settings = () => {
+  const { user } = useAuth();
   const [settings, setSettings] = useState({
     topBlock: '',
     bottomBlock: '',
@@ -143,6 +158,7 @@ const Settings = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (!canEditPrompts(user?.role)) return undefined;
     let cancelled = false;
     const loadPrompts = async () => {
       try {
@@ -174,7 +190,7 @@ const Settings = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user?.role]);
 
   const handlePromptChange = (field) => (event) => {
     const value = event.target.value;
@@ -252,18 +268,28 @@ const Settings = () => {
     }
   };
 
+  if (!canAccessSettings(user?.role)) {
+    return <Navigate to="/work-zone" replace />;
+  }
+
+  const canEdit = canEditPrompts(user?.role);
+
   return (
     <PageWrapper>
       <SettingsPanel>
         <SettingsHeader>
-          <SettingsTitle>AI Reply Prompts</SettingsTitle>
-          <SettingsDescription>
-            Керуйте шаблонами для двох типів відповідей. Кожен промпт має бути англійською, до 140 слів і базуватись
-            лише на реальних даних із листів та CRM.
-          </SettingsDescription>
+          <SettingsTitle>Налаштування</SettingsTitle>
+          {canEdit && (
+            <SettingsDescription>
+              Керуйте шаблонами для двох типів відповідей. Кожен промпт має бути англійською, до 140 слів і базуватись
+              лише на реальних даних із листів та CRM.
+            </SettingsDescription>
+          )}
         </SettingsHeader>
 
-        <PromptGrid>
+        {canEdit ? (
+          <>
+            <PromptGrid>
           <PromptSection>
             <PromptLabel>Top Block</PromptLabel>
             <PromptHint>Додається перед основним промптом для кожного варіанту.</PromptHint>
@@ -345,6 +371,12 @@ const Settings = () => {
             <FiSave size={18} /> Зберегти
           </PromptButton>
         </PromptActions>
+          </>
+        ) : (
+          <PromptRestrictedNotice>
+            Редагування промптів доступне лише для Owner
+          </PromptRestrictedNotice>
+        )}
       </SettingsPanel>
     </PageWrapper>
   );

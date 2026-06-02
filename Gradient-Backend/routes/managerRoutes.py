@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
@@ -5,6 +7,15 @@ from pydantic import BaseModel, EmailStr, Field
 from db import get_conn, db_lock
 from hashPswd import hash_password
 from service.leadService import get_current_user_role
+from service.rbac import (
+    ROLE_ADMIN,
+    ROLE_MANAGER,
+    ROLE_OWNER,
+    assert_owner,
+    assert_staff,
+    list_roles_for_user,
+    manageable_roles_for_user,
+)
 
 router = APIRouter(prefix="/admin/managers", tags=["Manager Management"])
 security = HTTPBearer()
@@ -15,10 +26,12 @@ def get_user_from_token(credentials: HTTPAuthorizationCredentials = Security(sec
     return get_current_user_role(token)
 
 
-def require_admin(user_info: dict = Depends(get_user_from_token)) -> dict:
-    if not user_info or user_info.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return user_info
+def require_owner_or_admin(user_info: dict = Depends(get_user_from_token)) -> dict:
+    return assert_staff(user_info)
+
+
+def _roles_in_clause(roles: tuple[str, ...]) -> str:
+    return ",".join(["?"] * len(roles))
 
 
 class ManagerCreatePayload(BaseModel):
@@ -36,11 +49,23 @@ class ManagerResetPasswordPayload(BaseModel):
     new_password: str = Field(min_length=6)
 
 
+class ManagerRolePayload(BaseModel):
+    role: Literal["manager", "admin"]
+
+
 @router.get("")
-def list_managers(_: dict = Depends(require_admin)):
+def list_managers(current_user: dict = Depends(require_owner_or_admin)):
+    roles = list_roles_for_user(current_user)
+    in_clause = _roles_in_clause(roles)
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, username, email, role, is_active, avatar_url FROM users WHERE role = 'manager' ORDER BY id ASC"
+            f"""
+            SELECT id, username, email, role, is_active, avatar_url
+            FROM users
+            WHERE role IN ({in_clause})
+            ORDER BY id ASC
+            """,
+            list(roles),
         ).fetchall()
 
     return {
@@ -59,7 +84,7 @@ def list_managers(_: dict = Depends(require_admin)):
 
 
 @router.post("")
-def create_manager(payload: ManagerCreatePayload, _: dict = Depends(require_admin)):
+def create_manager(payload: ManagerCreatePayload, _: dict = Depends(require_owner_or_admin)):
     with db_lock:
         with get_conn() as conn:
             exists = conn.execute(
@@ -89,8 +114,29 @@ def create_manager(payload: ManagerCreatePayload, _: dict = Depends(require_admi
     }
 
 
-@router.patch("/{manager_id}/status")
-def set_manager_status(manager_id: int, payload: ManagerStatusPayload, _: dict = Depends(require_admin)):
+def _get_manageable_user(conn, manager_id: int, current_user: dict):
+    allowed_roles = manageable_roles_for_user(current_user)
+    in_clause = _roles_in_clause(allowed_roles)
+    row = conn.execute(
+        f"SELECT id, username, role FROM users WHERE id = ? AND role IN ({in_clause})",
+        [manager_id, *allowed_roles],
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Manager not found")
+    return row
+
+
+@router.patch("/{manager_id}/role")
+def set_manager_role(
+    manager_id: int,
+    payload: ManagerRolePayload,
+    current_user: dict = Depends(get_user_from_token),
+):
+    assert_owner(current_user)
+
+    if payload.role not in (ROLE_MANAGER, ROLE_ADMIN):
+        raise HTTPException(status_code=400, detail="Invalid role")
+
     with db_lock:
         with get_conn() as conn:
             row = conn.execute(
@@ -101,9 +147,34 @@ def set_manager_status(manager_id: int, payload: ManagerStatusPayload, _: dict =
             if not row:
                 raise HTTPException(status_code=404, detail="Manager not found")
 
-            if row[1] != "manager":
-                raise HTTPException(status_code=400, detail="Only manager accounts can be updated")
+            current_role = row[1]
+            if current_role == ROLE_OWNER:
+                raise HTTPException(status_code=400, detail="Cannot change owner role")
 
+            if current_role not in (ROLE_MANAGER, ROLE_ADMIN):
+                raise HTTPException(status_code=400, detail="User role cannot be changed")
+
+            if current_role == payload.role:
+                return {"id": manager_id, "role": payload.role}
+
+            conn.execute(
+                "UPDATE users SET role = ? WHERE id = ?",
+                [payload.role, manager_id],
+            )
+            conn.commit()
+
+    return {"id": manager_id, "role": payload.role}
+
+
+@router.patch("/{manager_id}/status")
+def set_manager_status(
+    manager_id: int,
+    payload: ManagerStatusPayload,
+    current_user: dict = Depends(require_owner_or_admin),
+):
+    with db_lock:
+        with get_conn() as conn:
+            _get_manageable_user(conn, manager_id, current_user)
             conn.execute(
                 "UPDATE users SET is_active = ? WHERE id = ?",
                 [bool(payload.is_active), manager_id],
@@ -117,21 +188,11 @@ def set_manager_status(manager_id: int, payload: ManagerStatusPayload, _: dict =
 def reset_manager_password(
     manager_id: int,
     payload: ManagerResetPasswordPayload,
-    _: dict = Depends(require_admin),
+    current_user: dict = Depends(require_owner_or_admin),
 ):
     with db_lock:
         with get_conn() as conn:
-            row = conn.execute(
-                "SELECT id, role FROM users WHERE id = ?",
-                [manager_id],
-            ).fetchone()
-
-            if not row:
-                raise HTTPException(status_code=404, detail="Manager not found")
-
-            if row[1] != "manager":
-                raise HTTPException(status_code=400, detail="Only manager accounts can be updated")
-
+            _get_manageable_user(conn, manager_id, current_user)
             hashed_pwd = hash_password(payload.new_password)
             conn.execute(
                 "UPDATE users SET password = ? WHERE id = ?",
@@ -146,20 +207,13 @@ def reset_manager_password(
 def delete_manager(
     manager_id: int,
     confirm_username: str = Query(default="", description="Username confirmation (GitHub-style)"),
-    _: dict = Depends(require_admin),
+    current_user: dict = Depends(require_owner_or_admin),
 ):
     with db_lock:
         with get_conn() as conn:
-            row = conn.execute(
-                "SELECT id, username, role FROM users WHERE id = ?",
-                [manager_id],
-            ).fetchone()
-
-            if not row:
-                raise HTTPException(status_code=404, detail="Manager not found")
-
-            if row[2] != "manager":
-                raise HTTPException(status_code=400, detail="Only manager accounts can be deleted")
+            row = _get_manageable_user(conn, manager_id, current_user)
+            if row[2] == ROLE_OWNER:
+                raise HTTPException(status_code=400, detail="Cannot delete owner account")
 
             expected_username = row[1] or ""
             if (confirm_username or "").strip() != expected_username:

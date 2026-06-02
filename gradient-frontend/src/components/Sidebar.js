@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { FiUser } from 'react-icons/fi';
 import { getManagersStatus, resolveAvatarUrl } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { canViewStaffOnlineStatus, isAdmin, ROLE_ADMIN, staffRoleLabel } from '../utils/roles';
 
 const SidebarContainer = styled.aside`
   width: 140px;
@@ -103,6 +104,14 @@ const ManagerInfo = styled.div`
     font-weight: 600;
     text-align: center;
   }
+
+  small {
+    margin-top: 0.15rem;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme.colors.textSecondary};
+    text-align: center;
+  }
 `;
 
 const Sidebar = () => {
@@ -111,10 +120,19 @@ const Sidebar = () => {
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
 
-  const isAdmin = user?.role === 'admin';
+  const canViewStatus = canViewStaffOnlineStatus(user?.role);
+  const currentUserId = user?.id;
+
+  const excludeSelfFromManagers = (list) => {
+    if (!isAdmin(user?.role) || currentUserId == null) {
+      return list;
+    }
+    const selfId = Number(currentUserId);
+    return list.filter((m) => Number(m.id) !== selfId);
+  };
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canViewStatus) return;
     let cancelled = false;
 
     const loadManagers = async ({ showLoading = false } = {}) => {
@@ -125,12 +143,12 @@ const Sidebar = () => {
       try {
         const data = await getManagersStatus();
         if (!cancelled) {
-          setManagers(data?.managers || []);
+          setManagers(excludeSelfFromManagers(data?.managers || []));
         }
       } catch (error) {
         if (!cancelled) {
           setManagers([]);
-          setErrorText(error?.message || 'Не вдалося завантажити менеджерів.');
+          setErrorText(error?.message || 'Не вдалося завантажити статуси працівників.');
         }
       } finally {
         if (!cancelled && showLoading) {
@@ -146,46 +164,54 @@ const Sidebar = () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [isAdmin]);
+  }, [canViewStatus, currentUserId, user?.role]);
 
   const preparedManagers = useMemo(
     () =>
-      managers.map((manager) => ({
-        id: manager.id,
-        name: manager.username || manager.email || 'Менеджер',
-        avatar: resolveAvatarUrl(manager.avatar_url) || '',
-        status: manager.is_online ? 'online' : 'away',
+      managers.map((member) => ({
+        id: member.id,
+        name: member.username || member.email || staffRoleLabel(member.role),
+        role: member.role,
+        avatar: resolveAvatarUrl(member.avatar_url) || '',
+        status: member.is_online ? 'online' : 'offline',
       })),
     [managers]
   );
 
-  if (!isAdmin) {
+  if (!canViewStatus) {
     return null;
   }
 
   return (
     <SidebarContainer>
-      <Title>Менеджери</Title>
+      <Title>Команда</Title>
       {loading ? (
-        <EmptyState>Завантаження менеджерів...</EmptyState>
+        <EmptyState>Завантаження статусів...</EmptyState>
       ) : errorText ? (
         <EmptyState>{errorText}</EmptyState>
       ) : preparedManagers.length === 0 ? (
-        <EmptyState>У базі даних поки немає менеджерів.</EmptyState>
+        <EmptyState>У системі поки немає менеджерів або адміністраторів.</EmptyState>
       ) : (
         <ManagerList>
-          {preparedManagers.map((manager) => (
-            <ManagerItem key={manager.id}>
+          {preparedManagers.map((member) => (
+            <ManagerItem key={member.id}>
               <Avatar>
-                {manager.avatar ? (
-                  <AvatarImage src={manager.avatar} alt={manager.name} />
+                {member.avatar ? (
+                  <AvatarImage src={member.avatar} alt={member.name} />
                 ) : (
                   <FiUser size={26} color="#1b1c2f" />
                 )}
-                <StatusIndicator status={manager.status} />
+                <StatusIndicator
+                  status={member.status}
+                  title={member.status === 'online' ? 'Онлайн' : 'Офлайн'}
+                  aria-label={member.status === 'online' ? 'Онлайн' : 'Офлайн'}
+                />
               </Avatar>
               <ManagerInfo>
-                <p>{manager.name}</p>
+                <p>{member.name}</p>
+                {member.role === ROLE_ADMIN && (
+                  <small>{staffRoleLabel(member.role)}</small>
+                )}
               </ManagerInfo>
             </ManagerItem>
           ))}
