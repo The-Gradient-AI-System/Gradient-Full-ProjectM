@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from typing import Optional
 from service.leadService import get_current_user_role, assign_lead_to_user, get_user_leads, get_available_leads, get_all_leads_for_admin, get_assigned_leads_only, delete_lead_by_gmail_id
+from service.rbac import is_staff
 from db import get_conn
 
 router = APIRouter(prefix="/leads", tags=["Lead Management"])
@@ -70,8 +71,8 @@ def get_all_leads_admin(
     limit: int = Query(default=120, ge=1, le=500),
     user_info: dict = Depends(get_user_from_token)
 ):
-    """Admin only endpoint to see all leads with assignment info"""
-    if user_info["role"] != "admin":
+    """Owner/admin: all leads with assignment info"""
+    if not is_staff(user_info.get("role")):
         raise HTTPException(
             status_code=403,
             detail="Admin access required"
@@ -91,7 +92,7 @@ def get_assigned_leads(
     user_info: dict = Depends(get_user_from_token)
 ):
     """Get only assigned leads (exclude unassigned)"""
-    if user_info["role"] != "admin":
+    if not is_staff(user_info.get("role")):
         raise HTTPException(
             status_code=403,
             detail="Admin access required"
@@ -110,11 +111,11 @@ def delete_lead(
     gmail_id: str = Query(..., description="Gmail ID of the lead to delete"),
     user_info: dict = Depends(get_user_from_token)
 ):
-    """Delete a lead (admin only)"""
-    if user_info["role"] != "admin":
+    """Delete a lead (owner/admin)"""
+    if not is_staff(user_info.get("role")):
         raise HTTPException(
             status_code=403,
-            detail="Only admin can delete leads"
+            detail="Only owner or admin can delete leads"
         )
     
     result = delete_lead_by_gmail_id(gmail_id, user_info)

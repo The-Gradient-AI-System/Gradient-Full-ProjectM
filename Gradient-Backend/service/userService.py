@@ -1,3 +1,4 @@
+from service.rbac import ROLE_ADMIN, ROLE_MANAGER, STATUS_BAR_STAFF_ROLES
 from db import get_conn, db_lock
 from hashPswd import hash_password, verify_password
 from datetime import datetime, timedelta
@@ -56,18 +57,24 @@ def _parse_last_seen(value) -> datetime | None:
     return None
 
 
-def get_managers_with_online_status() -> list[dict]:
+def get_managers_with_online_status(*, exclude_user_id: int | None = None) -> list[dict]:
     threshold = datetime.utcnow() - timedelta(minutes=ONLINE_THRESHOLD_MINUTES)
+    role_placeholders = ", ".join(["?"] * len(STATUS_BAR_STAFF_ROLES))
+
+    query = f"""
+            SELECT id, username, avatar_url, last_seen, role
+            FROM users
+            WHERE role IN ({role_placeholders})
+              AND is_active IS NOT FALSE
+            """
+    params: list = list(STATUS_BAR_STAFF_ROLES)
+    if exclude_user_id is not None:
+        query += "\n              AND id != ?"
+        params.append(exclude_user_id)
+    query += "\n            ORDER BY role ASC, id ASC"
 
     with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, username, avatar_url, last_seen
-            FROM users
-            WHERE role = 'manager'
-            ORDER BY id ASC
-            """
-        ).fetchall()
+        rows = conn.execute(query, params).fetchall()
 
     managers = []
     for row in rows:
@@ -79,6 +86,7 @@ def get_managers_with_online_status() -> list[dict]:
                 "username": row[1],
                 "avatar_url": row[2] or "",
                 "is_online": is_online,
+                "role": row[4],
             }
         )
     return managers
@@ -157,7 +165,7 @@ def login_user(user):
             [stored_username],
         ).fetchone()
 
-    if user_id and role == "manager":
+    if user_id and role in (ROLE_MANAGER, ROLE_ADMIN):
         update_user_last_seen(user_id[0])
 
     access_token = create_access_token({"sub": stored_username, "role": role})

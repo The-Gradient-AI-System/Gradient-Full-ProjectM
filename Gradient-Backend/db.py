@@ -139,6 +139,8 @@ def _ensure_column(conn, table: str, column: str, definition: str) -> None:
         ).fetchone()
     if not exists:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        logger.info("Added column %s.%s (%s)", table, column, definition)
+        print(f"[db] Added column {table}.{column}")
 
 
 def _ensure_gmail_messages_status_fields(conn) -> None:
@@ -198,6 +200,47 @@ _APP_SETTINGS_SEED = [
     "Act as a Sales Expert. Prepare a recap & proposal email after a qualification call. Use only supplied information. Keep within 140 words and write in English. The structure must cover: greeting with [CLIENT_NAME]; paragraph recognising pains [CLIENT_PAIN_POINTS]; section describing our solution [SOLUTION_OVERVIEW]; bullet list for three proofs each with [PROJECT_NAME] and [RESULT]; closing call-to-action suggesting [NEXT_STEP].",
     "Act as a Sales Assistant. Write a very short, friendly reply (max 60 words). Keep it clear, warm, and action-oriented. Use only facts from the provided context and do not invent details.",
 ]
+
+
+def _migrate_user_roles(conn) -> None:
+    """Ensure at least one owner exists (legacy DBs may lack the owner role)."""
+    owner_row = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE role = 'owner'"
+    ).fetchone()
+    owner_count = int(owner_row[0]) if owner_row else 0
+    if owner_count == 0:
+        first_admin = conn.execute(
+            "SELECT id, username FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1"
+        ).fetchone()
+        if first_admin:
+            conn.execute(
+                "UPDATE users SET role = 'owner' WHERE id = ?",
+                [first_admin[0]],
+            )
+            logger.info(
+                "No owner in DB; promoted admin id=%s username=%s to owner",
+                first_admin[0],
+                first_admin[1],
+            )
+            print(
+                f"[db] No owner found; promoted admin id={first_admin[0]} "
+                f"({first_admin[1]}) to owner"
+            )
+        else:
+            first = conn.execute(
+                "SELECT id, username FROM users ORDER BY id ASC LIMIT 1"
+            ).fetchone()
+            if first:
+                conn.execute(
+                    "UPDATE users SET role = 'owner' WHERE id = ?",
+                    [first[0]],
+                )
+                logger.info(
+                    "No owner in DB; promoted first user id=%s username=%s to owner",
+                    first[0],
+                    first[1],
+                )
+                print(f"[db] No owner found; promoted id={first[0]} ({first[1]}) to owner")
 
 
 def _seed_app_settings(conn) -> None:
@@ -428,6 +471,7 @@ def init_db() -> None:
             _init_db_postgres(conn)
         else:
             _init_db_duckdb(conn)
+        _migrate_user_roles(conn)
         conn.commit()
 
 

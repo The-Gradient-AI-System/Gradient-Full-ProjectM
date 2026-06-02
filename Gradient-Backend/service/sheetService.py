@@ -450,7 +450,7 @@ def _count_visible_gmail_messages(user_info: dict | None) -> int:
     if not user_info:
         return 0
     role = user_info.get("role")
-    if role == "admin":
+    if role in ("admin", "owner"):
         with get_conn() as conn:
             row = conn.execute("SELECT COUNT(*) FROM gmail_messages").fetchone()
         return int(row[0] if row else 0)
@@ -458,12 +458,13 @@ def _count_visible_gmail_messages(user_info: dict | None) -> int:
         return 0
     user_id = user_info.get("id")
     with get_conn() as conn:
-        my_in_work = conn.execute(
-            f"SELECT gmail_id FROM gmail_messages gm WHERE {_MY_IN_WORK_WHERE}",
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM gmail_messages gm WHERE {_MY_IN_WORK_WHERE}",
             [user_id, user_id],
         ).fetchone()
-        if my_in_work:
-            return 1
+        in_work_count = int(row[0] if row else 0)
+        if in_work_count:
+            return in_work_count
         row = conn.execute(
             f"""
             SELECT COUNT(*) FROM gmail_messages gm
@@ -499,7 +500,7 @@ def build_leads_payload_from_db(
     row_parser = _lead_dict_from_row_light if lightweight else _lead_dict_from_row
 
     # Build query based on user role
-    if user_info and user_info.get("role") == "admin":
+    if user_info and user_info.get("role") in ("admin", "owner"):
         query = f"""
             SELECT {select_cols}
             FROM gmail_messages gm
@@ -519,7 +520,7 @@ def build_leads_payload_from_db(
         with db_lock:
             with get_conn() as conn:
                 my_in_work = conn.execute(
-                    f"SELECT gmail_id FROM gmail_messages gm WHERE {_MY_IN_WORK_WHERE}",
+                    f"SELECT 1 FROM gmail_messages gm WHERE {_MY_IN_WORK_WHERE} LIMIT 1",
                     [user_id, user_id],
                 ).fetchone()
 
@@ -528,9 +529,10 @@ def build_leads_payload_from_db(
                         SELECT {select_cols}
                         FROM gmail_messages gm
                         LEFT JOIN users u ON gm.assigned_to = u.id
-                        WHERE gm.gmail_id = ?
+                        WHERE {_MY_IN_WORK_WHERE}
+                        ORDER BY created_at DESC
                     """
-                    leads_data = conn.execute(query, [my_in_work[0]]).fetchall()
+                    leads_data = conn.execute(query, [user_id, user_id]).fetchall()
                 else:
                     query = f"""
                         SELECT {select_cols}
@@ -672,6 +674,10 @@ def build_leads_payload_from_db(
                 "leads": items[:25],
             }
         )
+
+    if user_info and user_info.get("role") == "manager":
+        for lead in leads:
+            lead["last_action_by"] = None
 
     return {
         "leads": leads,

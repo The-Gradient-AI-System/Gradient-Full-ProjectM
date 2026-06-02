@@ -330,6 +330,17 @@ export const deleteManager = (managerId, confirmUsername) =>
     }
   );
 
+export const assignManagerAsAdmin = (userId) =>
+  request(`/users/${encodeURIComponent(userId)}/assign-admin`, {
+    method: 'POST',
+  });
+
+export const updateManagerRole = (managerId, role) =>
+  request(`/admin/managers/${encodeURIComponent(managerId)}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+
 export const getMyProfile = () => request('/profile/me');
 
 export const updateMyProfile = (payload) =>

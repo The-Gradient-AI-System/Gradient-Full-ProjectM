@@ -13,7 +13,7 @@ from email import encoders
 from pydantic import BaseModel
 
 from service.gmailService import get_gmail_service
-from service.leadService import get_current_user_role
+from service.leadService import get_current_user_role, redact_last_action_by_for_manager
 from db import get_conn, db_lock
 
 router = APIRouter(prefix="/email", tags=["Email"])
@@ -164,7 +164,8 @@ def apply_email_action(
             updated = conn.execute(_EMAIL_SELECT, [msg_id]).fetchone()
             conn.commit()
 
-    return _format_email_row(updated)
+    result = _format_email_row(updated)
+    return redact_last_action_by_for_manager(result, user.get("role"))
 
 @router.post("/send")
 async def send_email_with_attachments(
