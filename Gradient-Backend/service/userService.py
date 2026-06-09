@@ -1,4 +1,5 @@
 from service.rbac import ROLE_ADMIN, ROLE_MANAGER, STATUS_BAR_STAFF_ROLES
+from service.avatarService import public_avatar_url
 from db import get_conn, db_lock
 from hashPswd import hash_password, verify_password
 from datetime import datetime, timedelta
@@ -84,7 +85,7 @@ def get_managers_with_online_status(*, exclude_user_id: int | None = None) -> li
             {
                 "id": row[0],
                 "username": row[1],
-                "avatar_url": row[2] or "",
+                "avatar_url": public_avatar_url(row[2] or ""),
                 "is_online": is_online,
                 "role": row[4],
             }

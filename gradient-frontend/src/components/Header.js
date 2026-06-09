@@ -494,7 +494,11 @@ const Header = () => {
 
           <UserAvatar>
 
-            <AvatarImage src={resolveAvatarUrl(user?.avatar_url) || userAvatar} alt="User avatar" />
+            <AvatarImage
+              key={user?.avatar_url || 'default'}
+              src={resolveAvatarUrl(user?.avatar_url) || userAvatar}
+              alt="User avatar"
+            />
 
             <StatusIndicator />
 
@@ -510,7 +514,11 @@ const Header = () => {
 
               <UserAvatar>
 
-                <AvatarImage src={resolveAvatarUrl(user?.avatar_url) || userAvatar} alt="User avatar" />
+                <AvatarImage
+              key={user?.avatar_url || 'default'}
+              src={resolveAvatarUrl(user?.avatar_url) || userAvatar}
+              alt="User avatar"
+            />
 
                 <StatusIndicator />
 

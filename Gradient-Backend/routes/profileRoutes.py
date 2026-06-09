@@ -5,6 +5,7 @@ from typing import Optional
 
 from db import get_conn, db_lock
 from hashPswd import hash_password, verify_password
+from service.avatarService import public_avatar_url
 from service.leadService import get_current_user_role
 from service.userService import create_access_token
 
@@ -54,7 +55,7 @@ def get_my_profile(user_info: dict = Depends(get_user_from_token)):
         "email": row[2],
         "role": row[3],
         "is_active": bool(row[4]),
-        "avatar_url": row[5] or "",
+        "avatar_url": public_avatar_url(row[5] or ""),
     }
 
 

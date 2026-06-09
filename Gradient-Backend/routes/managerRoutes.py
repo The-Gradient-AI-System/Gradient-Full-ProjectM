@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from db import get_conn, db_lock
 from hashPswd import hash_password
+from service.avatarService import public_avatar_url
 from service.leadService import get_current_user_role
 from service.rbac import (
     ROLE_ADMIN,
@@ -76,7 +77,7 @@ def list_managers(current_user: dict = Depends(require_owner_or_admin)):
                 "email": row[2],
                 "role": row[3],
                 "is_active": bool(row[4]),
-                "avatar_url": row[5] or "",
+                "avatar_url": public_avatar_url(row[5] or ""),
             }
             for row in rows
         ]

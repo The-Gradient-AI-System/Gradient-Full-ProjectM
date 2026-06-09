@@ -306,7 +306,9 @@ const Profile = () => {
   }, []);
 
   useEffect(() => {
-    if (user?.avatar_url) setAvatar(user.avatar_url);
+    if (user?.avatar_url !== undefined) {
+      setAvatar(user.avatar_url || '');
+    }
   }, [user?.avatar_url]);
 
   // --- Avatar handlers ---
@@ -406,6 +408,7 @@ const Profile = () => {
               aria-label="Змінити аватар"
             >
               <AvatarImage
+                key={avatar || user?.avatar_url || 'default'}
                 src={resolveAvatarUrl(avatar || user?.avatar_url) || userAvatar}
                 alt="Аватар користувача"
               />

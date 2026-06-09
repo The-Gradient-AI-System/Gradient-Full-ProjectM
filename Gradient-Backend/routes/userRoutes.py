@@ -6,6 +6,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 
 from db import db_lock, get_conn
+from service.avatarService import avatar_path_from_url, build_avatar_url, delete_avatar_file
 from service.leadService import get_current_user_role
 from service.rbac import (
     assert_owner,
@@ -150,14 +151,6 @@ def _resolve_avatar_extension(file: UploadFile) -> str:
     return CONTENT_TYPE_TO_EXT.get(content_type, "")
 
 
-def _delete_avatar_file(avatar_url: str | None) -> None:
-    if not avatar_url or not avatar_url.startswith("/static/avatars/"):
-        return
-    path = BASE_DIR / avatar_url.lstrip("/")
-    if path.is_file():
-        path.unlink(missing_ok=True)
-
-
 @users_router.post("/avatar")
 async def upload_user_avatar(
     file: UploadFile = File(...),
@@ -178,8 +171,8 @@ async def upload_user_avatar(
 
     user_id = current_user["id"]
     filename = f"avatar_{user_id}{extension}"
-    avatar_url = f"/static/avatars/{filename}"
     target_path = AVATARS_DIR / filename
+    avatar_url = build_avatar_url(filename)
 
     with db_lock:
         with get_conn() as conn:
@@ -200,7 +193,8 @@ async def upload_user_avatar(
             )
             conn.commit()
 
-    if previous_avatar and previous_avatar != avatar_url:
-        _delete_avatar_file(previous_avatar)
+    previous_path = avatar_path_from_url(previous_avatar)
+    if previous_path and previous_path != target_path:
+        delete_avatar_file(previous_avatar)
 
     return {"avatar_url": avatar_url}
