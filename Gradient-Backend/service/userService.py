@@ -133,7 +133,11 @@ def login_user(user):
 
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT username, password, role, is_active FROM users WHERE username = ? OR email = ?",
+            """
+            SELECT id, username, email, password, role, is_active, avatar_url
+            FROM users
+            WHERE username = ? OR email = ?
+            """,
             [username, user.email or username],
         ).fetchone()
 
@@ -143,7 +147,7 @@ def login_user(user):
             detail="Invalid username or password",
         )
 
-    stored_username, hashed_password, user_role, is_active = row
+    user_id, stored_username, stored_email, hashed_password, user_role, is_active, avatar_url = row
 
     if is_active is not None and not bool(is_active):
         raise HTTPException(
@@ -159,14 +163,19 @@ def login_user(user):
 
     role = user_role or "manager"
 
-    with get_conn() as conn:
-        user_id = conn.execute(
-            "SELECT id FROM users WHERE username = ?",
-            [stored_username],
-        ).fetchone()
-
     if user_id and role in (ROLE_MANAGER, ROLE_ADMIN):
-        update_user_last_seen(user_id[0])
+        update_user_last_seen(user_id)
 
     access_token = create_access_token({"sub": stored_username, "role": role})
-    return {"access_token": access_token, "token_type": "bearer", "role": role}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "role": role,
+        "user": {
+            "id": user_id,
+            "username": stored_username,
+            "email": stored_email or stored_username,
+            "role": role,
+            "avatar_url": avatar_url or "",
+        },
+    }

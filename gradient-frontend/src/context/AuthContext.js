@@ -455,6 +455,57 @@ export const AuthProvider = ({ children }) => {
     });
   }, []);
 
+  const hydrateLoginLeads = useCallback(async () => {
+    try {
+      const leadsPayload = await getGmailLeads(null, { lightweight: true });
+      const leads = leadsPayload?.leads ?? [];
+      const sortedLeads = [...leads]
+        .map((lead) => ({
+          ...lead,
+          _receivedAt: parseDateOrNull(lead.received_at),
+        }))
+        .filter((lead) => lead._receivedAt)
+        .sort((a, b) => b._receivedAt.getTime() - a._receivedAt.getTime());
+
+      const newestLead = sortedLeads[0] ?? null;
+      loginSnapshotRef.current = leadsPayload;
+      setLeadSnapshot(leadsPayload);
+      writeLeadSnapshot(leadsPayload);
+
+      const lastSeenIso = readLastSeenLeadTime();
+      const lastSeenDate = parseDateOrNull(lastSeenIso);
+      const newLeadCount = sortedLeads.reduce((acc, lead) => {
+        if (!lastSeenDate) {
+          return acc + 1;
+        }
+        return lead._receivedAt > lastSeenDate ? acc + 1 : acc;
+      }, 0);
+
+      if (newestLead) {
+        const relative = formatRelativeTime(newestLead.received_at);
+        pushNotification({
+          variant: newLeadCount ? 'success' : 'info',
+          title: newLeadCount ? 'Вам надійшли нові листи' : 'Нові листи відсутні',
+          message: newLeadCount
+            ? `${formatEmailCountMessage(newLeadCount)}${relative ? ` Останній отримано ${relative}.` : ''}`
+            : relative
+              ? `Останній лист отримано ${relative}.`
+              : 'Вхідні актуальні, ви нічого не пропустили.',
+          duration: 0,
+        });
+      } else {
+        pushNotification({
+          variant: 'info',
+          title: 'Вхідні порожні',
+          message: 'Наразі у вас немає листів для обробки.',
+          duration: 0,
+        });
+      }
+    } catch (notifyError) {
+      console.error('Не вдалося завантажити інформацію про листи після входу', notifyError);
+    }
+  }, [pushNotification]);
+
   const login = useCallback(async ({ email, password }) => {
 
     setLoading(true);
@@ -495,116 +546,27 @@ export const AuthProvider = ({ children }) => {
 
       setToken(receivedToken);
 
-      setUser({ email, username: email, role: userRole, avatar_url: '' });
-
-      try {
-        const profile = await getMyProfile();
-        if (profile) {
-          const nextUser = {
+      const profile = response?.user;
+      const nextUser = profile
+        ? {
             id: profile.id ?? null,
             username: profile.username || email,
             email: profile.email || email,
             role: profile.role || userRole,
             avatar_url: profile.avatar_url || '',
-          };
-          setUser(nextUser);
-          writeUserProfile(nextUser);
-        }
-      } catch (profileError) {
-        console.warn('Не вдалося отримати профіль після входу', profileError);
-      }
-
-
-
-      try {
-
-        const leadsPayload = await getGmailLeads(null, { lightweight: true });
-
-        const leads = leadsPayload?.leads ?? [];
-
-        const sortedLeads = [...leads]
-
-          .map((lead) => ({
-
-            ...lead,
-
-            _receivedAt: parseDateOrNull(lead.received_at),
-
-          }))
-
-          .filter((lead) => lead._receivedAt)
-
-          .sort((a, b) => b._receivedAt.getTime() - a._receivedAt.getTime());
-
-        const newestLead = sortedLeads[0] ?? null;
-
-        loginSnapshotRef.current = leadsPayload;
-
-        const lastSeenIso = readLastSeenLeadTime();
-
-        const lastSeenDate = parseDateOrNull(lastSeenIso);
-
-        const newLeadCount = sortedLeads.reduce((acc, lead) => {
-
-          if (!lastSeenDate) {
-
-            return acc + 1;
-
           }
+        : {
+            id: null,
+            email,
+            username: email,
+            role: userRole,
+            avatar_url: '',
+          };
 
-          return lead._receivedAt > lastSeenDate ? acc + 1 : acc;
+      setUser(nextUser);
+      writeUserProfile(nextUser);
 
-        }, 0);
-
-
-
-        if (newestLead) {
-
-          const relative = formatRelativeTime(newestLead.received_at);
-
-          pushNotification({
-
-            variant: newLeadCount ? 'success' : 'info',
-
-            title: newLeadCount ? 'Вам надійшли нові листи' : 'Нові листи відсутні',
-
-            message: newLeadCount
-
-              ? `${formatEmailCountMessage(newLeadCount)}${relative ? ` Останній отримано ${relative}.` : ''}`
-
-              : relative
-
-              ? `Останній лист отримано ${relative}.`
-
-              : 'Вхідні актуальні, ви нічого не пропустили.',
-
-            duration: 0,
-
-          });
-
-        } else {
-
-          pushNotification({
-
-            variant: 'info',
-
-            title: 'Вхідні порожні',
-
-            message: 'Наразі у вас немає листів для обробки.',
-
-            duration: 0,
-
-          });
-
-        }
-
-      } catch (notifyError) {
-
-        console.error('Не вдалося завантажити інформацію про листи після входу', notifyError);
-
-      }
-
-
+      void hydrateLoginLeads();
 
       return { success: true };
 
@@ -622,7 +584,7 @@ export const AuthProvider = ({ children }) => {
 
     }
 
-  }, [pushNotification]);
+  }, [hydrateLoginLeads]);
 
 
 

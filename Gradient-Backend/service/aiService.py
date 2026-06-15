@@ -207,6 +207,43 @@ def _apply_reply_blocks(prompt_text: str, top_block: str, bottom_block: str) -> 
     return "\n\n".join(parts).strip()
 
 
+def _generate_single_reply_variant(
+    variant: str,
+    *,
+    template: str,
+    mapping: dict[str, str],
+    context: str,
+    style_modifier: str,
+    top_block: str,
+    bottom_block: str,
+) -> tuple[str, str]:
+    rendered_prompt = _render_prompt(template, mapping)
+    if style_modifier:
+        rendered_prompt = _apply_reply_blocks(rendered_prompt, style_modifier, "")
+    rendered_prompt = _apply_reply_blocks(rendered_prompt, str(top_block), str(bottom_block))
+
+    if not rendered_prompt:
+        return variant, ""
+
+    messages = _build_reply_messages(rendered_prompt, context)
+
+    try:
+        completion = client.chat.completions.create(
+            model=AI_MODEL,
+            messages=messages,
+            temperature=0.35,
+        )
+        choice = completion.choices[0] if completion.choices else None
+        content = choice.message.content if choice and choice.message else ""
+    except Exception as exc:  # pragma: no cover
+        if AI_DEBUG:
+            print(f"[AI] generate_email_replies error for {variant}: {exc}")
+        content = ""
+
+    max_words = 60 if variant == "quick" else MAX_REPLY_WORDS
+    return variant, _enforce_word_limit(content or "", max_words=max_words)
+
+
 def generate_email_replies(
     *,
     lead: dict[str, Any] | None,
@@ -237,35 +274,24 @@ def generate_email_replies(
     mapping = _collect_placeholder_mapping(lead, email, placeholders)
     context = _compose_reply_context(lead, email, placeholders)
 
-    replies: dict[str, str] = {}
-    for variant in REPLY_VARIANTS:
-        template = prompts.get(variant, "")
-        rendered_prompt = _render_prompt(template, mapping)
-        if style_modifier:
-            rendered_prompt = _apply_reply_blocks(rendered_prompt, style_modifier, "")
-        rendered_prompt = _apply_reply_blocks(rendered_prompt, str(top_block), str(bottom_block))
-
-        if not rendered_prompt:
-            replies[variant] = ""
-            continue
-
-        messages = _build_reply_messages(rendered_prompt, context)
-
-        try:
-            completion = client.chat.completions.create(
-                model=AI_MODEL,
-                messages=messages,
-                temperature=0.35,
+    replies: dict[str, str] = {variant: "" for variant in REPLY_VARIANTS}
+    with ThreadPoolExecutor(max_workers=len(REPLY_VARIANTS)) as executor:
+        futures = [
+            executor.submit(
+                _generate_single_reply_variant,
+                variant,
+                template=prompts.get(variant, ""),
+                mapping=mapping,
+                context=context,
+                style_modifier=style_modifier,
+                top_block=str(top_block),
+                bottom_block=str(bottom_block),
             )
-            choice = completion.choices[0] if completion.choices else None
-            content = choice.message.content if choice and choice.message else ""
-        except Exception as exc:  # pragma: no cover
-            if AI_DEBUG:
-                print(f"[AI] generate_email_replies error for {variant}: {exc}")
-            content = ""
-
-        max_words = 60 if variant == "quick" else MAX_REPLY_WORDS
-        replies[variant] = _enforce_word_limit(content or "", max_words=max_words)
+            for variant in REPLY_VARIANTS
+        ]
+        for future in futures:
+            variant, content = future.result()
+            replies[variant] = content
 
     return replies
 

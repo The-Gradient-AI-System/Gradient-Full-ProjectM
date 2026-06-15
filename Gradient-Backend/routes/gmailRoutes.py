@@ -10,7 +10,6 @@ from db import get_conn, db_lock
 from service.syncService import sync_gmail_to_sheets
 from service.sheetService import build_leads_payload, build_leads_payload_from_db, update_lead_status, update_lead_status_gmail_id
 from service.aiService import analyze_email, generate_email_replies
-from service.settingsService import get_reply_prompts
 from service.leadService import get_current_user_role, redact_leads_last_action_by
 
 router = APIRouter(prefix="/gmail", tags=["Gmail"])
@@ -94,6 +93,7 @@ class ReplyGenerationRequest(BaseModel):
     lead: dict | None = None
     placeholders: dict | None = None
     prompt_overrides: dict | None = None
+    style: str | None = None
 
 
 @router.post("/generate-replies")
@@ -110,12 +110,10 @@ def generate_replies(payload: ReplyGenerationRequest):
         email=email_context,
         placeholders=payload.placeholders,
         prompt_overrides=payload.prompt_overrides,
+        style=payload.style,
     )
 
-    return {
-        "prompts": get_reply_prompts(),
-        "replies": replies,
-    }
+    return {"replies": replies}
 
 
 # Unified status system - supporting both old and new status values

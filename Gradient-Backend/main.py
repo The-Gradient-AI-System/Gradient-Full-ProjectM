@@ -57,6 +57,11 @@ app.include_router(emailRoutes.emails_router)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(auto_sync_loop())
