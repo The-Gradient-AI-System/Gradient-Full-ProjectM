@@ -5,6 +5,11 @@ import { getManagersStatus, resolveAvatarUrl } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { canViewStaffOnlineStatus, isAdmin, ROLE_ADMIN, staffRoleLabel } from '../utils/roles';
 
+const STATUS_POLL_MS = Math.max(
+  10000,
+  Number.parseInt(process.env.REACT_APP_STATUS_POLL_MS || '30000', 10) || 30000
+);
+
 const SidebarContainer = styled.aside`
   width: 140px;
   padding: 0.75rem;
@@ -160,12 +165,24 @@ const Sidebar = () => {
       }
     };
 
-    loadManagers({ showLoading: true });
-    const intervalId = window.setInterval(() => loadManagers(), 10000);
+    const safeLoad = (options = {}) => {
+      if (document.visibilityState !== 'visible') return;
+      loadManagers(options);
+    };
+
+    safeLoad({ showLoading: true });
+    const intervalId = window.setInterval(() => safeLoad(), STATUS_POLL_MS);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        safeLoad();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [canViewStatus, currentUserId, user?.role, excludeSelfFromManagers]);
 

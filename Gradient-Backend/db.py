@@ -417,7 +417,19 @@ def _ensure_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS idx_gmail_messages_created_at ON gmail_messages (created_at DESC)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_gmail_messages_status ON gmail_messages (status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_gmail_messages_assigned_to ON gmail_messages (assigned_to)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_gmail_messages_assigned_manager_id ON gmail_messages (assigned_manager_id)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_lsh_gmail_changed ON lead_status_history (gmail_id, changed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_users_role ON users (role)"
     )
 
 

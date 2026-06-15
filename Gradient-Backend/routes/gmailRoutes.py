@@ -1,3 +1,6 @@
+import logging
+import os
+
 from fastapi import APIRouter, Query, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
@@ -12,6 +15,8 @@ from service.leadService import get_current_user_role, redact_leads_last_action_
 
 router = APIRouter(prefix="/gmail", tags=["Gmail"])
 security = HTTPBearer()
+logger = logging.getLogger(__name__)
+GMAIL_DEBUG = (os.getenv("GMAIL_DEBUG", "false").strip().lower() in {"1", "true", "yes", "on"})
 
 def get_user_from_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     """Extract user info from Authorization header"""
@@ -34,7 +39,8 @@ def get_leads(
     lightweight: bool = Query(default=False),
     user_info: dict | None = Depends(get_user_from_token)
 ):
-    print(f"[DEBUG] get_leads called, user_info: {user_info}")
+    if GMAIL_DEBUG:
+        logger.debug("get_leads called, has_user=%s", bool(user_info))
     try:
         if user_info:
             # Use role-based filtering from database
@@ -49,12 +55,15 @@ def get_leads(
                 payload.get("leads", []),
                 user_info.get("role"),
             )
-        print(f"[DEBUG] Returning payload with {len(payload.get('leads', []))} leads, stats: {payload.get('stats')}")
+        if GMAIL_DEBUG:
+            logger.debug(
+                "Returning payload with %s leads, stats keys=%s",
+                len(payload.get("leads", [])),
+                list((payload.get("stats") or {}).keys()),
+            )
         return payload
     except Exception as e:
-        import traceback
-        print(f"[ERROR] get_leads failed: {e}")
-        print(traceback.format_exc())
+        logger.exception("get_leads failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -199,7 +208,13 @@ def set_lead_status(payload: LeadStatusUpdateRequest, user_info: dict = Depends(
                         "SELECT status, assigned_to FROM gmail_messages WHERE gmail_id = ?",
                         [payload.gmail_id],
                     ).fetchone()
-                    print(f"[DEBUG] Lead {payload.gmail_id} updated to status: {updated_lead[0]}, assigned_to: {updated_lead[1]}")
+                    if GMAIL_DEBUG:
+                        logger.debug(
+                            "Lead %s updated to status=%s assigned_to=%s",
+                            payload.gmail_id,
+                            updated_lead[0],
+                            updated_lead[1],
+                        )
 
             return {
                 "gmail_id": payload.gmail_id,
