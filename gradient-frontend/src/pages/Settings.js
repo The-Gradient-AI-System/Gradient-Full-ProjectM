@@ -5,6 +5,12 @@ import { Navigate } from 'react-router-dom';
 import { getReplyPrompts, updateReplyPrompts } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { canAccessSettings, canEditPrompts } from '../utils/roles';
+import {
+  emptyReplySettings,
+  normalizeReplySettings,
+  readCachedReplySettings,
+  writeCachedReplySettings,
+} from '../utils/replySettingsCache';
 
 const PageWrapper = styled.section`
   width: 100%;
@@ -87,6 +93,8 @@ const PromptEditor = styled.textarea`
   line-height: 1.7;
   resize: vertical;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), 0 26px 50px rgba(4, 8, 22, 0.28);
+  opacity: ${({ disabled }) => (disabled ? 0.7 : 1)};
+  cursor: ${({ disabled }) => (disabled ? 'wait' : 'text')};
 
   &:focus {
     outline: none;
@@ -147,40 +155,38 @@ const PromptRestrictedNotice = styled.p`
 `;
 
 const Settings = () => {
-  const { user } = useAuth();
-  const [settings, setSettings] = useState({
-    topBlock: '',
-    bottomBlock: '',
-    styles: { official: '', semi_official: '' },
-    prompts: { follow_up: '', recap: '', quick: '' },
+  const { user, isAuthenticated } = useAuth();
+  const [settings, setSettings] = useState(() => {
+    const cached = readCachedReplySettings();
+    return cached ? normalizeReplySettings(cached) : emptyReplySettings();
   });
   const [statusMessage, setStatusMessage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [promptsLoading, setPromptsLoading] = useState(() => !readCachedReplySettings());
 
   useEffect(() => {
-    if (!canEditPrompts(user?.role)) return undefined;
+    if (!isAuthenticated || !canEditPrompts(user?.role)) return undefined;
     let cancelled = false;
+
     const loadPrompts = async () => {
+      const hasCache = Boolean(readCachedReplySettings());
+      if (!hasCache) {
+        setPromptsLoading(true);
+      }
       try {
         const data = await getReplyPrompts();
         if (!cancelled && data) {
-          setSettings({
-            topBlock: data.topBlock || '',
-            bottomBlock: data.bottomBlock || '',
-            styles: {
-              official: data.styles?.official || '',
-              semi_official: data.styles?.semi_official || '',
-            },
-            prompts: {
-              follow_up: data.prompts?.follow_up || '',
-              recap: data.prompts?.recap || '',
-              quick: data.prompts?.quick || '',
-            },
-          });
+          const normalized = normalizeReplySettings(data);
+          setSettings(normalized);
+          writeCachedReplySettings(normalized);
         }
       } catch (error) {
         if (!cancelled) {
           setStatusMessage('Не вдалося завантажити промпти.');
+        }
+      } finally {
+        if (!cancelled) {
+          setPromptsLoading(false);
         }
       }
     };
@@ -190,7 +196,7 @@ const Settings = () => {
     return () => {
       cancelled = true;
     };
-  }, [user?.role]);
+  }, [isAuthenticated, user?.role]);
 
   const handlePromptChange = (field) => (event) => {
     const value = event.target.value;
@@ -221,19 +227,9 @@ const Settings = () => {
     setStatusMessage(null);
     try {
       const fresh = await getReplyPrompts();
-      setSettings({
-        topBlock: fresh?.topBlock || '',
-        bottomBlock: fresh?.bottomBlock || '',
-        styles: {
-          official: fresh?.styles?.official || '',
-          semi_official: fresh?.styles?.semi_official || '',
-        },
-        prompts: {
-          follow_up: fresh?.prompts?.follow_up || '',
-          recap: fresh?.prompts?.recap || '',
-          quick: fresh?.prompts?.quick || '',
-        },
-      });
+      const normalized = normalizeReplySettings(fresh);
+      setSettings(normalized);
+      writeCachedReplySettings(normalized);
       setStatusMessage('Промпти повернуто до збережених значень.');
     } catch (error) {
       setStatusMessage('Не вдалося отримати промпти.');
@@ -247,7 +243,7 @@ const Settings = () => {
     setStatusMessage(null);
     try {
       const updated = await updateReplyPrompts(settings);
-      setSettings({
+      const normalized = normalizeReplySettings({
         topBlock: updated?.topBlock || settings.topBlock,
         bottomBlock: updated?.bottomBlock || settings.bottomBlock,
         styles: {
@@ -260,6 +256,8 @@ const Settings = () => {
           quick: updated?.prompts?.quick || settings.prompts.quick,
         },
       });
+      setSettings(normalized);
+      writeCachedReplySettings(normalized);
       setStatusMessage('Промпти успішно збережено.');
     } catch (error) {
       setStatusMessage('Не вдалося зберегти промпти.');
@@ -273,6 +271,7 @@ const Settings = () => {
   }
 
   const canEdit = canEditPrompts(user?.role);
+  const inputsLocked = promptsLoading || loading;
 
   return (
     <PageWrapper>
@@ -289,6 +288,9 @@ const Settings = () => {
 
         {canEdit ? (
           <>
+            {promptsLoading && (
+              <StatusMessage>Завантаження шаблонів...</StatusMessage>
+            )}
             <PromptGrid>
           <PromptSection>
             <PromptLabel>Top Block</PromptLabel>
@@ -297,6 +299,7 @@ const Settings = () => {
               value={settings.topBlock}
               onChange={handleBlockChange('topBlock')}
               placeholder="Введіть верхній системний блок"
+              disabled={inputsLocked}
             />
           </PromptSection>
 
@@ -307,6 +310,7 @@ const Settings = () => {
               value={settings.bottomBlock}
               onChange={handleBlockChange('bottomBlock')}
               placeholder="Введіть нижній системний блок"
+              disabled={inputsLocked}
             />
           </PromptSection>
 
@@ -317,6 +321,7 @@ const Settings = () => {
               value={settings.styles.official}
               onChange={handleStyleChange('official')}
               placeholder="Введіть модифікатор офіційного стилю"
+              disabled={inputsLocked}
             />
           </PromptSection>
 
@@ -327,6 +332,7 @@ const Settings = () => {
               value={settings.styles.semi_official}
               onChange={handleStyleChange('semi_official')}
               placeholder="Введіть модифікатор напів-офіційного стилю"
+              disabled={inputsLocked}
             />
           </PromptSection>
 
@@ -337,6 +343,7 @@ const Settings = () => {
               value={settings.prompts.follow_up}
               onChange={handlePromptChange('follow_up')}
               placeholder="Введіть шаблон follow-up"
+              disabled={inputsLocked}
             />
           </PromptSection>
 
@@ -347,6 +354,7 @@ const Settings = () => {
               value={settings.prompts.recap}
               onChange={handlePromptChange('recap')}
               placeholder="Введіть шаблон recap & proposal"
+              disabled={inputsLocked}
             />
           </PromptSection>
 
@@ -357,6 +365,7 @@ const Settings = () => {
               value={settings.prompts.quick}
               onChange={handlePromptChange('quick')}
               placeholder="Введіть шаблон quick reply"
+              disabled={inputsLocked}
             />
           </PromptSection>
         </PromptGrid>
@@ -364,10 +373,10 @@ const Settings = () => {
         {statusMessage && <StatusMessage $error={statusMessage.includes('Не вдалося')}>{statusMessage}</StatusMessage>}
 
         <PromptActions>
-          <PromptButton type="button" onClick={resetPrompts} disabled={loading}>
+          <PromptButton type="button" onClick={resetPrompts} disabled={inputsLocked}>
             <FiRefreshCcw size={18} /> Скинути
           </PromptButton>
-          <PromptButton type="button" $primary onClick={savePrompts} disabled={loading}>
+          <PromptButton type="button" $primary onClick={savePrompts} disabled={inputsLocked}>
             <FiSave size={18} /> Зберегти
           </PromptButton>
         </PromptActions>

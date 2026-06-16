@@ -13,6 +13,7 @@ from routes.passwordResetRoutes import router as password_reset_router
 from routes import emailRoutes
 from routes.leadRoutes import router as lead_router
 from service.autosyncService import auto_sync_loop
+from service.settingsService import get_reply_settings
 import asyncio
 
 app = FastAPI()
@@ -67,4 +68,8 @@ async def startup():
     secret = (os.getenv("SECRET_KEY") or "").strip()
     if not secret:
         print("[startup] WARNING: SECRET_KEY is not set — JWT authentication will fail")
+    try:
+        get_reply_settings()
+    except Exception as exc:
+        print(f"[startup] reply settings preload failed: {exc}")
     asyncio.create_task(auto_sync_loop())

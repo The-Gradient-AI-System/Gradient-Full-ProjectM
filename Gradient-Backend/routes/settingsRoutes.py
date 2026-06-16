@@ -16,6 +16,13 @@ def get_user_from_token(credentials: HTTPAuthorizationCredentials = Security(sec
     return get_current_user_role(token)
 
 
+def get_user_from_token_no_activity(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+):
+    token = credentials.credentials
+    return get_current_user_role(token, update_activity=False)
+
+
 class ReplyPromptsPayload(BaseModel):
     follow_up: str = Field(default="", description="Prompt used for follow-up replies")
     recap: str = Field(default="", description="Prompt used for recap replies")
@@ -30,7 +37,7 @@ class ReplySettingsPayload(BaseModel):
 
 
 @router.get("/reply-prompts")
-def read_reply_prompts(user_info: dict = Depends(get_user_from_token)) -> ReplySettingsPayload:
+def read_reply_prompts(user_info: dict = Depends(get_user_from_token_no_activity)) -> ReplySettingsPayload:
     assert_owner(user_info)
     settings = get_reply_settings()
     return ReplySettingsPayload(**settings)

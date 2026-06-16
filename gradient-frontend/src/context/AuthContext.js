@@ -17,6 +17,9 @@ import {
 
 } from '../api/client';
 
+import { prefetchReplyPrompts } from '../utils/replySettingsCache';
+import { ROLE_OWNER } from '../utils/roles';
+
 
 
 const AuthContext = createContext();
@@ -399,6 +402,14 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (!token) return;
+    const cachedProfile = readUserProfile();
+    if (cachedProfile?.role === ROLE_OWNER) {
+      void prefetchReplyPrompts();
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
     let cancelled = false;
     const hydrateProfile = async () => {
       try {
@@ -416,6 +427,9 @@ export const AuthProvider = ({ children }) => {
           writeUserProfile(next);
           return next;
         });
+        if (profile.role === ROLE_OWNER) {
+          void prefetchReplyPrompts();
+        }
       } catch (error) {
         console.warn('Не вдалося завантажити профіль користувача', error);
       }
@@ -583,6 +597,9 @@ export const AuthProvider = ({ children }) => {
       writeUserProfile(nextUser);
 
       void hydrateLoginLeads();
+      if (nextUser.role === ROLE_OWNER) {
+        void prefetchReplyPrompts();
+      }
 
       return { success: true };
 
