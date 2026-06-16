@@ -354,6 +354,22 @@ export const AuthProvider = ({ children }) => {
 
 
   useEffect(() => {
+    const onSessionExpired = () => {
+      setToken(null);
+      setUser(null);
+      clearUserProfile();
+      setLeadSnapshot(null);
+      writeLeadSnapshot(null);
+      setError('Сесія закінчилась. Увійдіть знову.');
+    };
+
+    window.addEventListener('auth:session-expired', onSessionExpired);
+    return () => window.removeEventListener('auth:session-expired', onSessionExpired);
+  }, []);
+
+
+
+  useEffect(() => {
 
     const storedToken = loadAuthToken();
 

@@ -131,6 +131,20 @@ const parseJsonSafely = async response => {
 
 
 
+const parseErrorDetail = (detail) => {
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => (typeof item === 'string' ? item : item?.msg || JSON.stringify(item)))
+      .join(', ');
+  }
+  if (typeof detail === 'object') {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+  return String(detail);
+};
+
 const request = async (path, options = {}) => {
   const headers = new Headers(options.headers || {});
   const isFormData =
@@ -159,7 +173,14 @@ const request = async (path, options = {}) => {
 
     const errorBody = await parseJsonSafely(response).catch(() => null);
 
-    const detail = errorBody?.detail || errorBody?.message;
+    const detail = parseErrorDetail(errorBody?.detail || errorBody?.message);
+
+    if (response.status === 401) {
+      clearAuthToken();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('auth:session-expired', { detail }));
+      }
+    }
 
     throw new Error(detail || response.statusText || 'Request failed');
 

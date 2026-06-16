@@ -64,4 +64,7 @@ def health():
 
 @app.on_event("startup")
 async def startup():
+    secret = (os.getenv("SECRET_KEY") or "").strip()
+    if not secret:
+        print("[startup] WARNING: SECRET_KEY is not set — JWT authentication will fail")
     asyncio.create_task(auto_sync_loop())

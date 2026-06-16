@@ -73,7 +73,7 @@ def logout(user_info: dict = Depends(get_user_from_token_no_activity)):
 
 
 @users_router.get("/managers/status")
-def get_managers_status(current_user: dict = Depends(get_user_from_token)):
+def get_managers_status(current_user: dict = Depends(get_user_from_token_no_activity)):
     """Team online status for owner/admin sidebar.
 
     - owner: all managers and admins.

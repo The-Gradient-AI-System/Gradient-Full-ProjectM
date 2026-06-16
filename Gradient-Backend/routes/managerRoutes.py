@@ -26,6 +26,13 @@ def get_user_from_token(credentials: HTTPAuthorizationCredentials = Security(sec
     return get_current_user_role(token)
 
 
+def get_user_from_token_no_activity(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+):
+    token = credentials.credentials
+    return get_current_user_role(token, update_activity=False)
+
+
 def require_owner_or_admin(user_info: dict = Depends(get_user_from_token)) -> dict:
     return assert_staff(user_info)
 
@@ -54,7 +61,8 @@ class ManagerRolePayload(BaseModel):
 
 
 @router.get("")
-def list_managers(current_user: dict = Depends(require_owner_or_admin)):
+def list_managers(current_user: dict = Depends(get_user_from_token_no_activity)):
+    assert_staff(current_user)
     roles = list_roles_for_user(current_user)
     in_clause = _roles_in_clause(roles)
     with get_conn() as conn:
