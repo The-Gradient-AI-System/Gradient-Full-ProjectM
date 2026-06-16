@@ -225,7 +225,7 @@ def delete_manager(
                     [int(manager_id)],
                 )
                 conn.execute(
-                    "UPDATE users SET role = 'manager_deleted', is_active = FALSE WHERE id = ?",
+                    "DELETE FROM users WHERE id = ?",
                     [int(manager_id)],
                 )
                 conn.commit()

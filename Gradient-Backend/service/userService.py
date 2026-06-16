@@ -1,3 +1,5 @@
+import threading
+
 from service.rbac import ROLE_ADMIN, ROLE_MANAGER, STATUS_BAR_STAFF_ROLES
 from db import get_conn, db_lock
 from hashPswd import hash_password, verify_password
@@ -22,15 +24,33 @@ try:
 except ValueError:
     ONLINE_THRESHOLD_MINUTES = 5
 
+try:
+    LAST_SEEN_UPDATE_SECONDS = max(10, int(os.getenv("LAST_SEEN_UPDATE_SECONDS", "60")))
+except ValueError:
+    LAST_SEEN_UPDATE_SECONDS = 60
+
+_last_seen_touch_lock = threading.Lock()
+_last_seen_touched_at: dict[int, datetime] = {}
+
 
 def update_user_last_seen(user_id: int) -> None:
-    with db_lock:
+    now = datetime.utcnow()
+    with _last_seen_touch_lock:
+        prev = _last_seen_touched_at.get(user_id)
+        if prev and (now - prev).total_seconds() < LAST_SEEN_UPDATE_SECONDS:
+            return
+        _last_seen_touched_at[user_id] = now
+
+    try:
         with get_conn() as conn:
             conn.execute(
                 "UPDATE users SET last_seen = ? WHERE id = ?",
-                [datetime.utcnow(), user_id],
+                [now, user_id],
             )
             conn.commit()
+    except Exception:
+        # Presence updates must never block request processing.
+        pass
 
 
 def mark_user_offline(user_id: int) -> None:
